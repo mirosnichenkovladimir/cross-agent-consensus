@@ -1,7 +1,6 @@
 ---
 name: cross-agent-consensus
 description: "Manual protocol package for auditable cross-agent task execution and validation loops. Invocation aliases: CAC, cac."
-version: 0.5.1
 aliases:
   - CAC
   - cac
