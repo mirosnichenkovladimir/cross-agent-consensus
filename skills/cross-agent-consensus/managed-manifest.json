@@ -10,15 +10,16 @@
     },
     {
       "path": "VERSION",
-      "sha256": "aba951626c8690ce493cbc8f018205bb468003f61fbf00fd3d3c71cebabc0177"
+      "sha256": "97a5d6e540a6120d09c39ddb667e0e8e2bac7fcc2ffef813b82e08fd60365bce"
     },
     {
       "path": "config/defaults.yaml",
-      "sha256": "d722a37807850868a610f30d29a19cb066e5f2654bb98fac4c3a6337ec84c950"
+      "sha256": "bc9e0b70d72eabb3215355a4a36ff348c4cba20c48fe443cbfa79e12303a94ad"
     },
     {
       "path": "config/config.local.example.yaml",
-      "sha256": "d722a37807850868a610f30d29a19cb066e5f2654bb98fac4c3a6337ec84c950"
+      "sha256": "90bb6321c4b39b6d41441d79e7d5be1ef9a7779283b7f508d314c876fe814e85",
+      "bytes": 1292
     },
     {
       "path": "cross_agent_consensus/capture.py",
@@ -26,7 +27,7 @@
     },
     {
       "path": "cross_agent_consensus/config.py",
-      "sha256": "71320a85c769a77d638971c1fdc6724593f02cb507b9323f35d8804b0babd196"
+      "sha256": "b5a53675aa5f61ba940c7d0d27569f994877ef0d1b2ef5c2398e5ea982661ccf"
     },
     {
       "path": "cross_agent_consensus/__init__.py",
@@ -39,6 +40,11 @@
     {
       "path": "cross_agent_consensus/invocation/adapters.py",
       "sha256": "70c3cc66275c484b52a338c350020e36df0ec54c06b11ae8e182ed33f9a99765"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/peek.py",
+      "sha256": "b594f466dd45a7b50cbece810cb5adf61ff8c52424c0d65b0f963552baf32bc3",
+      "bytes": 17687
     },
     {
       "path": "cross_agent_consensus/invocation/process_monitor.py",
@@ -62,7 +68,8 @@
     },
     {
       "path": "cross_agent_consensus/cli.py",
-      "sha256": "5f01f7fd051dc3ae681b8634c586cdee3b09874cf54fba82cab032813b37308a"
+      "sha256": "61cf75adf313e1c9d01ba9d9d85c26e937fb5628d29186fff6d00ba59e34d141",
+      "bytes": 51967
     },
     {
       "path": "cross_agent_consensus/io.py",

@@ -37,3 +37,8 @@ reviewer_clis:
 invocation:
   require_invocation_ready: true
   direct_reviewer_cli: explicit_only
+  peek:
+    interval_seconds: 180
+    tail: 80
+    snippet_chars: 160
+    monitor_stale_seconds: 30

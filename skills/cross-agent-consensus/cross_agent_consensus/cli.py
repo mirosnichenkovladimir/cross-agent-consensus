@@ -105,6 +105,7 @@ from cross_agent_consensus.invocation.readiness import (
     cmd_invocation_ready,
     normalize_command_separator,
 )
+from cross_agent_consensus.invocation.peek import cmd_agent_peek
 from cross_agent_consensus.invocation.status import (
     agent_session_state_counts,
     cmd_agent_status,
@@ -402,6 +403,12 @@ def setup_config_payload() -> dict[str, Any]:
         "invocation": {
             "require_invocation_ready": True,
             "direct_reviewer_cli": "explicit_only",
+            "peek": {
+                "interval_seconds": 180,
+                "tail": 80,
+                "snippet_chars": 160,
+                "monitor_stale_seconds": 30,
+            },
         },
     }
     if reviewer_clis:
@@ -1184,6 +1191,21 @@ def build_parser() -> argparse.ArgumentParser:
     agent_watch.add_argument("--follow", action="store_true")
     agent_watch.add_argument("--interval-seconds", type=float, default=1.0)
     agent_watch.set_defaults(func=cmd_agent_watch)
+
+    agent_peek = sub.add_parser("agent-peek", help="Print a read-only operator peek for one agent session.")
+    add_common_run_arg(agent_peek)
+    agent_peek.add_argument("--actor", required=True, help="Reviewer identity whose session is being peeked.")
+    agent_peek.add_argument("--round", default="round-1", help="Round identifier (e.g. '1' or 'round-001').")
+    agent_peek.add_argument("--session", help="Specific session directory name; defaults to the latest session.")
+    agent_peek.add_argument("--tail", type=int, help="Max event lines to scan from each telemetry file (1-1000).")
+    agent_peek.add_argument("--snippet-chars", type=int, help="Cap on snippet text length before truncation (40-500).")
+    agent_peek.add_argument("--monitor-stale-seconds", type=float, help="Heartbeat age beyond which the monitor is reported stale.")
+    agent_peek.add_argument("--follow", action="store_true", help="Re-emit a snapshot every --interval-seconds until terminal or stale.")
+    agent_peek.add_argument("--interval-seconds", type=float, help="Sleep between snapshots when --follow is set.")
+    agent_peek.add_argument("--config", help="Explicit config file path; overrides layered resolution.")
+    agent_peek.add_argument("--no-config", action="store_true", help="Skip layered config resolution; use defaults and flags only.")
+    agent_peek.add_argument("--cwd", help="Override working directory used to discover layered config.")
+    agent_peek.set_defaults(func=cmd_agent_peek)
 
     agent_cancel = sub.add_parser("agent-cancel", help="Request cancellation for a live agent session.")
     add_common_run_arg(agent_cancel)

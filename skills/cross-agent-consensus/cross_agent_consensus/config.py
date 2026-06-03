@@ -17,6 +17,16 @@ from cross_agent_consensus.models import ConfigResolution
 CONFIG_SCHEMA_VERSION = "cross-agent-consensus-config-1"
 TASK_SCHEMA_VERSION = "cross-agent-consensus-task-1"
 CAC_VERSION = read_cac_version()
+PEEK_CONFIG_DEFAULTS = {
+    "interval_seconds": 180.0,
+    "tail": 80,
+    "snippet_chars": 160,
+    "monitor_stale_seconds": 30.0,
+}
+
+
+def is_plain_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def deep_merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -270,13 +280,37 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
     if invocation is not None and not isinstance(invocation, dict):
         errors.append(f"{source}: invocation must be a mapping")
     elif isinstance(invocation, dict):
-        allowed_invocation = {"require_invocation_ready", "direct_reviewer_cli", "unattended_invocation"}
+        allowed_invocation = {"require_invocation_ready", "direct_reviewer_cli", "unattended_invocation", "peek"}
         unknown_invocation = sorted(set(invocation) - allowed_invocation)
         if unknown_invocation:
             message = f"{source}: unknown invocation keys: {', '.join(unknown_invocation)}"
             (errors if strict else warnings).append(message)
         if invocation.get("direct_reviewer_cli") not in {None, "explicit_only"}:
             errors.append(f"{source}: invocation.direct_reviewer_cli must be explicit_only")
+        peek = invocation.get("peek", {})
+        if peek is not None and not isinstance(peek, dict):
+            errors.append(f"{source}: invocation.peek must be a mapping")
+        elif isinstance(peek, dict):
+            allowed_peek = {"interval_seconds", "tail", "snippet_chars", "monitor_stale_seconds"}
+            unknown_peek = sorted(set(peek) - allowed_peek)
+            if unknown_peek:
+                message = f"{source}: unknown invocation.peek keys: {', '.join(unknown_peek)}"
+                (errors if strict else warnings).append(message)
+            interval = peek.get("interval_seconds")
+            if interval is not None and (not is_plain_number(interval) or float(interval) <= 0):
+                errors.append(f"{source}: invocation.peek.interval_seconds must be a number > 0")
+            tail = peek.get("tail")
+            if tail is not None and (not isinstance(tail, int) or isinstance(tail, bool) or not 1 <= tail <= 1000):
+                errors.append(f"{source}: invocation.peek.tail must be an integer between 1 and 1000")
+            snippet_chars = peek.get("snippet_chars")
+            if (
+                snippet_chars is not None
+                and (not isinstance(snippet_chars, int) or isinstance(snippet_chars, bool) or not 40 <= snippet_chars <= 500)
+            ):
+                errors.append(f"{source}: invocation.peek.snippet_chars must be an integer between 40 and 500")
+            stale = peek.get("monitor_stale_seconds")
+            if stale is not None and (not is_plain_number(stale) or float(stale) <= 0):
+                errors.append(f"{source}: invocation.peek.monitor_stale_seconds must be a number > 0")
         unattended = invocation.get("unattended_invocation")
         if isinstance(unattended, dict) and unattended.get("enabled") is True:
             scope = unattended.get("scope")

@@ -1,3 +1,7 @@
+# Example local override file. Copy to `config.local.yaml` (gitignored) and edit.
+# Layered resolution merges `defaults.yaml` (committed) with this file on top,
+# then any `--config` value passed on the CLI. Keys omitted here inherit from
+# `defaults.yaml`; keys present here override the same path in defaults.
 schema_version: cross-agent-consensus-config-1
 defaults:
   profile: document-consensus
@@ -37,3 +41,8 @@ reviewer_clis:
 invocation:
   require_invocation_ready: true
   direct_reviewer_cli: explicit_only
+  peek:
+    interval_seconds: 180
+    tail: 80
+    snippet_chars: 160
+    monitor_stale_seconds: 30
