@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "skills" / "cross-agent-consensus"
+sys.path.insert(0, str(PACKAGE_ROOT))
+
+from cross_agent_consensus.invocation.adapters import (
+    ClaudeCliPlayer,
+    CodexCliPlayer,
+    GenericCliPlayer,
+    get_player_adapter,
+)
+from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths
+
+
+def session_paths(session: Path) -> AgentSessionPaths:
+    return AgentSessionPaths(
+        session=session,
+        invocation=session / "invocation.json",
+        command=session / "command.json",
+        prompt=session / "prompt.md",
+        events=session / "events.jsonl",
+        agent_log=session / "agent.log",
+        stdout=session / "stdout.raw",
+        stderr=session / "stderr.raw",
+        state=session / "state.json",
+        exit=session / "exit.json",
+        final_output=session / "final-output.md",
+    )
+
+
+def invocation(tmp: Path, command: list[str], player_id: str = "generic-cli") -> AgentInvocation:
+    return AgentInvocation(
+        run=tmp / "run",
+        round_id="round-001",
+        phase="reviewer",
+        actor_identity="reviewer-a",
+        player_id=player_id,
+        prompt_path=tmp / "prompt.md",
+        raw_output_path=tmp / "raw.out",
+        command=command,
+        cwd=tmp,
+        approved=True,
+        idle_timeout_seconds=1.0,
+        stale_timeout_seconds=2.0,
+        heartbeat_interval_seconds=0.1,
+        session_id="session-001",
+    )
+
+
+class InvocationPlayerTests(unittest.TestCase):
+    def test_generic_player_probe_and_command_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            adapter = GenericCliPlayer()
+            command = [sys.executable, "--version"]
+            capabilities = adapter.probe(command)
+            self.assertTrue(capabilities.executable)
+            self.assertEqual(capabilities.output_modes, ["raw_stdout"])
+
+            spec = adapter.build_command(invocation(tmp, command))
+            self.assertEqual(spec.argv, command)
+            self.assertEqual(spec.prompt_transport, "stdin")
+            self.assertEqual(spec.output_mode, "raw_stdout")
+
+    def test_claude_and_codex_adapters_detect_json_commands(self) -> None:
+        self.assertTrue(ClaudeCliPlayer().command_requests_json(["claude", "-p", "--output-format=stream-json"]))
+        self.assertTrue(ClaudeCliPlayer().command_requests_json(["claude", "-p", "--output-format", "stream-json"]))
+        self.assertFalse(ClaudeCliPlayer().command_requests_json(["claude", "-p"]))
+        self.assertTrue(CodexCliPlayer().command_requests_json(["codex", "exec", "--json", "-"]))
+        self.assertFalse(CodexCliPlayer().command_requests_json(["codex", "exec", "-"]))
+
+    def test_structured_player_parses_events_and_final_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            paths = session_paths(tmp / "session-001")
+            paths.session.mkdir()
+            inv = invocation(tmp, ["codex", "exec", "--json", "-"], "codex-cli")
+            adapter = get_player_adapter("codex-cli")
+
+            events = adapter.parse_stream_events(
+                "stdout",
+                (
+                    json.dumps({"type": "item.started", "item": {"type": "command_execution", "status": "in_progress"}})
+                    + "\n"
+                    + json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "FINAL"}})
+                    + "\n"
+                ).encode(),
+                {"stdout": ""},
+                inv,
+            )
+            self.assertEqual([event["normalized_type"] for event in events], ["tool_call", "message"])
+
+            paths.stdout.write_text(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "FINAL"}}) + "\n")
+            adapter.extract_final_output(paths)
+            self.assertEqual(paths.final_output.read_text(encoding="utf-8"), "FINAL\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

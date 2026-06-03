@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/cross-model-consensus/finding.schema.json",
+  "title": "CanonicalFinding",
+  "type": "object",
+  "required": ["id", "artifact_version", "raw_finding_ids", "severity", "materiality", "status", "claim"],
+  "properties": {
+    "id": {"type": "string"},
+    "artifact_version": {"type": "string"},
+    "raw_finding_ids": {"type": "array", "items": {"type": "string"}},
+    "severity": {"enum": ["blocker", "important", "minor", "taste", "question"]},
+    "materiality": {"enum": ["material", "non_material", "unknown"]},
+    "status": {"type": "string"},
+    "location": {"type": "string"},
+    "claim": {"type": "string"},
+    "evidence": {"type": "string"},
+    "suggested_fix": {"type": "string"}
+  }
+}

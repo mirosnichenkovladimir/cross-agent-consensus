@@ -1,0 +1,4 @@
+# Runtime output
+runs/
+*.tmp
+.DS_Store

@@ -1,0 +1,176 @@
+{
+  "package": "cross-agent-consensus",
+  "schema_version": "m2-managed-manifest-1",
+  "source_root": "skills/cross-agent-consensus",
+  "hash_algorithm": "sha256",
+  "managed_files": [
+    {
+      "path": "SKILL.md",
+      "sha256": "0ec737f5e14f854c482a378a57883d34da8dd5611a4e5fc9609c42caaabe05fe"
+    },
+    {
+      "path": "VERSION",
+      "sha256": "aba951626c8690ce493cbc8f018205bb468003f61fbf00fd3d3c71cebabc0177"
+    },
+    {
+      "path": "config/defaults.yaml",
+      "sha256": "d722a37807850868a610f30d29a19cb066e5f2654bb98fac4c3a6337ec84c950"
+    },
+    {
+      "path": "config/config.local.example.yaml",
+      "sha256": "d722a37807850868a610f30d29a19cb066e5f2654bb98fac4c3a6337ec84c950"
+    },
+    {
+      "path": "cross_agent_consensus/capture.py",
+      "sha256": "c042d9bcc84ce1ac2549d30c07f5203bef299d8df8bc0072b8349c927ea5a484"
+    },
+    {
+      "path": "cross_agent_consensus/config.py",
+      "sha256": "71320a85c769a77d638971c1fdc6724593f02cb507b9323f35d8804b0babd196"
+    },
+    {
+      "path": "cross_agent_consensus/__init__.py",
+      "sha256": "29ba54ec8db3a9346510bd8601701296154fcce576cca1d560eee077c0f657e4"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/__init__.py",
+      "sha256": "997bc431abb4438c9acac07e0b3ea87b45a679e6668f454a7ddfec336199b16a"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/adapters.py",
+      "sha256": "70c3cc66275c484b52a338c350020e36df0ec54c06b11ae8e182ed33f9a99765"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/process_monitor.py",
+      "sha256": "9735c97930f8488e1429ed4c10379a0e8aa2c173503d6227bf819bebb81d95db"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/readiness.py",
+      "sha256": "766f668d9541c0ca2d0975f11d12468f43cf4e39517822e2e1d9db26b2983461"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/session_paths.py",
+      "sha256": "1b087df67f3732b251e3e6ee1d38c01f945666e375901e0f0b4101b4ab391053"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/status.py",
+      "sha256": "52d6486128191a80adab5ac4fb224095adac31c1f7794de5c2d9744babfe712b"
+    },
+    {
+      "path": "cross_agent_consensus/invocation/telemetry.py",
+      "sha256": "a6972ccbd600d367e27ec2aeb8c5ab03c899f0678fae511deebc27cc3a5b3c6a"
+    },
+    {
+      "path": "cross_agent_consensus/cli.py",
+      "sha256": "5f01f7fd051dc3ae681b8634c586cdee3b09874cf54fba82cab032813b37308a"
+    },
+    {
+      "path": "cross_agent_consensus/io.py",
+      "sha256": "f7d58ff221fa1ee4e08febfbb9a8fa1c7cc57bca5f6f52141206dcb6cec5bcf5"
+    },
+    {
+      "path": "cross_agent_consensus/init.py",
+      "sha256": "f22a237ed1d79a40069cfe56c2a43e2cbf5d8a411f013f2e6965b23190b4e894"
+    },
+    {
+      "path": "cross_agent_consensus/layout.py",
+      "sha256": "30423f36e41fcb0a18533694333b181bea53114d71200a873d4ae7c693c862c6"
+    },
+    {
+      "path": "cross_agent_consensus/markdown_records.py",
+      "sha256": "02e34bf144b7b81f483d92c03a0fb4c620ffd69c86a67571567ad5c04c655f69"
+    },
+    {
+      "path": "cross_agent_consensus/models.py",
+      "sha256": "d1e787f2c44a3241694ffafc85493dd261ce4af4905644d7861a8a97756c34c2"
+    },
+    {
+      "path": "cross_agent_consensus/prompts.py",
+      "sha256": "ebde8ee7657b3ed4bbaa6d0a289cc1c49f4b394ae417ed13cbbaf62777bbedfd"
+    },
+    {
+      "path": "cross_agent_consensus/record_schema.py",
+      "sha256": "9fa6adba79edc45c68731b4e56e405aba632d5cf2b4a22d518cfeec61bfd20cf"
+    },
+    {
+      "path": "cross_agent_consensus/records.py",
+      "sha256": "95418c1fe41d0a36e40d64c88ea6415823c19fe6a66a71b39d9dd9d691c1da53"
+    },
+    {
+      "path": "cross_agent_consensus/run_store.py",
+      "sha256": "f6219a87b06e83097f45066ff4b51863b124baf010936dab080cc4d5fcd2739c"
+    },
+    {
+      "path": "cross_agent_consensus/termination.py",
+      "sha256": "86f32c66e0b1f1dbd8eec8748c5634ef00f8f64cb7e3708cd7224abb05382870"
+    },
+    {
+      "path": "cross_agent_consensus/validation.py",
+      "sha256": "b11e26bc62dba00e756418163f3b3ffdae6055d4854b642b5c448e138702c76f"
+    },
+    {
+      "path": "references/protocol-checklist.md",
+      "sha256": "25ad6237a7cf79570c46bf77b2d3134a60cff46a3cc4937fea6b5feab99d6830"
+    },
+    {
+      "path": "references/invocation.md",
+      "sha256": "f79cda630b672f888a4a89a1253e4f38fef755e6c95178d138a8b5a325c38c03"
+    },
+    {
+      "path": "references/record-contract.md",
+      "sha256": "a601501d4fed4259bee96e56e4cfbedc54dba6dd921dc305f0033ce7b1f9b606"
+    },
+    {
+      "path": "templates/artifact-version.md",
+      "sha256": "27265cbf769240f0d26e5ddca80650d395edf7c8037e6da0eec8160130c8e060"
+    },
+    {
+      "path": "templates/author-responses.md",
+      "sha256": "cd0db2d9f944dc3c47d03dd1d133f38569fff13843ae6b3503e989b1f1680122"
+    },
+    {
+      "path": "templates/escalation.md",
+      "sha256": "4e3a7297c874a54add434f33a37cd0db9f38af27a8dd4a7df8b753f8f808597e"
+    },
+    {
+      "path": "templates/normalization.md",
+      "sha256": "d7c093d45beaf3e05662895b9c6992db827141b0cd1c9c4c2fc51a26e3763f4a"
+    },
+    {
+      "path": "templates/prompts.md",
+      "sha256": "4f6748c3e5e9da92b52a718f69f8961b527495e49572745b2983a4591fc90907"
+    },
+    {
+      "path": "templates/rereview.md",
+      "sha256": "0a497ac6dc3ff5f9d18a613aa8e895b07cc331ee739dd9ed253e2114bfc14a5c"
+    },
+    {
+      "path": "templates/review-batch.md",
+      "sha256": "5e26f2fde6dad38fae10b9e810522ad6c2fe6906ca7f4252d8eda14fd690a000"
+    },
+    {
+      "path": "templates/review.md",
+      "sha256": "83e217370e6d4dec963d707af2a27d89b4c08145a209b7aaa35664bf873268bb"
+    },
+    {
+      "path": "templates/run-init.md",
+      "sha256": "6c440744ff7b306ba0063df927e807473e5faf49791814725f92f2368667b7c0"
+    },
+    {
+      "path": "templates/report.md",
+      "sha256": "7d34057fba0c4d98898f81e0bf17614cbcc0b789293035ccd6d27acaa8d66ae3"
+    },
+    {
+      "path": "templates/validation.md",
+      "sha256": "6ed0e4bfeec9ffce8678a3fc96e051de53c8d3b7e1fd8db58811c49515927ae3"
+    },
+    {
+      "path": "scripts/consensus",
+      "sha256": "e9b7b83e9423c26039ff842da107e4b3faac3bb5755c07f919c944261c41dd31"
+    },
+    {
+      "path": "scripts/cac_tool.py",
+      "sha256": "8f6689c9eec323f3240decdf04497065cf0db802c1110431a90bc8ac5189f3f4"
+    }
+  ]
+}

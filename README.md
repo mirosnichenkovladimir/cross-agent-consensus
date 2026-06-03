@@ -1,93 +1,93 @@
-# cross-agent-consensus
+# Cross-Agent Consensus
 
+Runtime-neutral protocol and implementation profiles for coordinating multiple AI agents until they reach auditable consensus on an artifact.
 
+The repository path still carries the historical `cross-model-consensus` name, but new public/protocol artifacts use `cross-agent-consensus`.
 
-## Getting started
+This repo separates:
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+1. `specs/` — normative protocol contract. No concrete model or tool names.
+2. `profiles/` — artifact-specific policies and prompt templates.
+3. `skills/` — installable manual protocol packages. M2 ships `skills/cross-agent-consensus/`.
+4. `implementations/` — runtime discovery and role-mapping notes for Hermes, Codex, Claude, and later runtimes.
+5. `schemas/` — portable structured data shapes from earlier protocol work.
+6. `examples/` — small fixtures and example consensus runs.
+7. `runners/` — optional automation. M2 does not add an automatic cross-runtime runner.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Core rule: reviewer comments are claims, not commands. An author may accept, reject, partially accept, or ask for clarification, but every material finding must be explicitly handled and auditable.
 
-## Add your files
+## Current scope
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+The first target profile is still `document-consensus`, but the installed CAC package now supports a broader manual workflow for design, documentation, and implementation review artifacts. It remains an auditable manual protocol package, not an automatic cross-runtime code-modification runner.
 
+## CAC skill package
+
+Install the manual `cross-agent-consensus` skill package with the terse `cac` installer alias:
+
+```bash
+./scripts/install-cac --target hermes
+./scripts/install-cac --target codex
+./scripts/install-cac --target claude
+./scripts/install-cac --target all --update
 ```
-cd existing_repo
-git remote add origin https://gitlab.corp.cloudlinux.com/kc-python-automation/cross-agent-consensus.git
-git branch -M main
-git push -uf origin main
+
+The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications.
+
+Trigger examples after install:
+
+```text
+cac: do design for <feature>
+cac: implement this feature and do review
+Use CAC to do <task> with main <author> and validators <reviewers>.
 ```
 
-## Integrate with your tools
+`CAC`/`cac` are invocation aliases for generic task execution plus validation. Installed package and protocol records stay named `cross-agent-consensus`. A pure review is only one task shape, not the whole feature.
 
-- [ ] [Set up project integrations](https://gitlab.corp.cloudlinux.com/kc-python-automation/cross-agent-consensus/-/settings/integrations)
+## Helper CLI
 
-## Collaborate with your team
+When `skills/cross-agent-consensus/scripts/consensus` is available, use it for deterministic run bookkeeping:
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- `init` creates the run folder, participant records, first review batch, artifact record, and config-resolution record.
+- `config show|validate|paths|setup` handles installed, user-local, project, task-file, and CLI configuration.
+- `prompt` writes exact reviewer, author, validator, re-review, and final-report prompts into the run folder.
+- `capture` preserves raw reviewer, validator, and manual evidence output as protocol records.
+- `conclusion-validation` creates a `scope_triage` batch where the same reviewers validate normalized Canonical Finding conclusions. This is not a fresh review; reviewers answer `agree`, `disagree`, or `needs_human` and must include rationale.
+- `invoke-agent`, `agent-status`, `agent-watch`, and `agent-cancel` run and monitor explicitly configured external reviewer CLIs with session telemetry.
+- `terminate` writes the terminal human verification artifact, `report.md`.
 
-## Test and Deploy
+## Reviewers And Focus
 
-Use the built-in continuous integration in GitLab.
+Reviewer identities are participants. Review focus values are prompt lenses.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+If saved configuration supplies reviewers such as `codex` and `claude`, `consensus init --reviewer ...` must not silently replace them. Use `--review-focus` for emphasis areas such as publication safety, API surface, or dispatcher policy. Use `--allow-reviewer-config-override` only when intentionally replacing configured reviewers.
 
-***
+Configured CLI reviewers must be invoked with `consensus invoke-agent` before their `RawReviewerOutput` is terminally valid. Direct `capture` is still valid for manual/imported evidence, but it is not live reviewer CLI telemetry.
 
-# Editing this README
+## Terminal Report
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Terminal output is `report.md`, not `termination.md`.
 
-## Suggestions for a good README
+The report starts with human-readable result blocks for each Canonical Finding:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```text
+Problem:
+<one-sentence issue>
 
-## Name
-Choose a self-explaining name for your project.
+Explanation:
+<why/how it happens, with causal flow>
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+Required action:
+<what must be fixed>
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+After the human sections, `report.md` still contains parseable `TerminationRecord` and `FinalReport` sections so protocol validation remains deterministic.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Suggested first dogfood run
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Use the protocol to review its own `specs/protocol.md`:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- Author Agent drafts/revises the protocol.
+- Reviewer Agents independently inspect the artifact.
+- Orchestrator records findings and author responses.
+- Re-reviewers verify fixes or accept/reject rebuttals.
+- Human Supervisor is asked only at consensus or unresolved material disagreement.

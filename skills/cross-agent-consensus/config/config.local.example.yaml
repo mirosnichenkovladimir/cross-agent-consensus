@@ -1,0 +1,39 @@
+schema_version: cross-agent-consensus-config-1
+defaults:
+  profile: document-consensus
+  run_root: runs
+  round_limits:
+    max_fresh_review_rounds: 1
+    max_fresh_review_rounds_without_human_approval: 2
+    max_remediation_rounds_per_finding: 2
+participants:
+  orchestrator: codex-orchestrator
+  author: codex-primary
+  reviewers:
+    - codex
+    - claude
+  human_supervisor: none
+reviewer_clis:
+  codex:
+    command:
+      - codex
+      - exec
+      - --json
+      - "-"
+    prompt_transport: stdin
+    stdout_capture: raw_output
+    stderr_capture: raw_error
+  claude:
+    command:
+      - claude
+      - -p
+      - --verbose
+      - --output-format
+      - stream-json
+      - --include-partial-messages
+    prompt_transport: stdin
+    stdout_capture: raw_output
+    stderr_capture: raw_error
+invocation:
+  require_invocation_ready: true
+  direct_reviewer_cli: explicit_only

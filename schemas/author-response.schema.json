@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/cross-model-consensus/author-response.schema.json",
+  "title": "AuthorResponse",
+  "type": "object",
+  "required": ["finding_id", "response_type", "reasoning"],
+  "properties": {
+    "finding_id": {"type": "string"},
+    "response_type": {"enum": ["accept", "reject", "partially_accept", "request_clarification"]},
+    "reasoning": {"type": "string"},
+    "planned_change": {"type": "string"},
+    "artifact_version_after_fix": {"type": "string"}
+  }
+}
