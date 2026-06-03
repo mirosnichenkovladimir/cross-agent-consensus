@@ -7,12 +7,9 @@ The repository path still carries the historical `cross-model-consensus` name, b
 This repo separates:
 
 1. `specs/` — normative protocol contract. No concrete model or tool names.
-2. `profiles/` — artifact-specific policies and prompt templates.
-3. `skills/` — installable manual protocol packages. M2 ships `skills/cross-agent-consensus/`.
-4. `implementations/` — runtime discovery and role-mapping notes for Hermes, Codex, Claude, and later runtimes.
-5. `schemas/` — portable structured data shapes from earlier protocol work.
-6. `examples/` — small fixtures and example consensus runs.
-7. `runners/` — optional automation. M2 does not add an automatic cross-runtime runner.
+2. `skills/` — installable manual protocol packages. M2 ships `skills/cross-agent-consensus/`.
+3. `implementations/` — runtime discovery and role-mapping notes for Hermes, Codex, Claude, and later runtimes.
+4. `schemas/` — portable structured data shapes from earlier protocol work.
 
 Core rule: reviewer comments are claims, not commands. An author may accept, reject, partially accept, or ask for clarification, but every material finding must be explicitly handled and auditable.
 
