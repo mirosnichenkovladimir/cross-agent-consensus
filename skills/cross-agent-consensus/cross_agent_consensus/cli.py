@@ -110,6 +110,7 @@ from cross_agent_consensus.invocation.readiness import (
     normalize_command_separator,
 )
 from cross_agent_consensus.invocation.peek import cmd_agent_peek
+from cross_agent_consensus.invocation.selftest import cmd_selftest
 from cross_agent_consensus.invocation.session_paths import FINAL_OUTPUT_MIRROR_SUFFIX
 from cross_agent_consensus.invocation.status import (
     agent_session_state_counts,
@@ -1340,6 +1341,28 @@ def build_parser() -> argparse.ArgumentParser:
     terminate.add_argument("--final-artifact-version")
     terminate.add_argument("--reason", required=True)
     terminate.set_defaults(func=cmd_terminate)
+
+    selftest = sub.add_parser(
+        "selftest",
+        help="Self-diagnostic checks for the installed CAC skill package.",
+    )
+    selftest.add_argument(
+        "--invocation",
+        action="store_true",
+        help="Verify the skill is installed and discoverable; emit per-host routing guidance.",
+    )
+    selftest.add_argument(
+        "--host",
+        choices=["claude", "codex", "hermes", "auto"],
+        default="auto",
+        help="Restrict checks to a single host; default checks every host detected on this machine.",
+    )
+    selftest.add_argument(
+        "--write-suggested-rule",
+        metavar="PATH",
+        help="(opt-in) Write the recommended cac: invocation rule snippet to PATH and verify markers.",
+    )
+    selftest.set_defaults(func=cmd_selftest)
 
     return parser
 

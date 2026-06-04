@@ -10,7 +10,7 @@
     },
     {
       "path": "VERSION",
-      "sha256": "d0176718bd214ce8474c06ed61c395ca113fdfc2acdd86d9aa9933b40d9b561e"
+      "sha256": "9c788a838dc1f6bfd80fa39757a95f94260071c35011c9a05301da1c73507657"
     },
     {
       "path": "config/defaults.yaml",
@@ -55,6 +55,10 @@
       "sha256": "766f668d9541c0ca2d0975f11d12468f43cf4e39517822e2e1d9db26b2983461"
     },
     {
+      "path": "cross_agent_consensus/invocation/selftest.py",
+      "sha256": "504ea3b835abeda507995eb9a52dd9e1f0b9eec56f48b3bfa2262ace71770b8a"
+    },
+    {
       "path": "cross_agent_consensus/invocation/session_paths.py",
       "sha256": "b90ff110d3b124af6b896b538d31ec18601a09d140e58007f0d5c40dea71b4d1"
     },
@@ -68,7 +72,7 @@
     },
     {
       "path": "cross_agent_consensus/cli.py",
-      "sha256": "70cac31cab0caea1fd91efe167fb66c7468f1d1fdd9863438f768bc3882ea1ee",
+      "sha256": "9540c231a455381fc658828f8435bf397f38d5bfac6e2deb434d85622097290d",
       "bytes": 56481
     },
     {
