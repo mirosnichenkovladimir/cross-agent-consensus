@@ -7,12 +7,58 @@ import json
 import time
 from pathlib import Path
 
+from cross_agent_consensus.capture import NARRATIVE_FINDING_ID_RE
 from cross_agent_consensus.io import eprint, read_json_file
 from cross_agent_consensus.models import AgentSessionPaths
 
 from .readiness import padded_round_id
 from .session_paths import latest_agent_session
 from .telemetry import AGENT_STATUS_SCHEMA, event_tail, read_state_without_schema
+
+# Event types in events.jsonl that indicate an agent error or abnormal terminal state;
+# surfaced as `summary.event_errors` so the orchestrator can decide whether to rerun.
+_AGENT_ERROR_EVENT_TYPES = {"failed", "cancelled", "timeout", "stale", "rejected", "error"}
+
+
+def _file_line_count(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        return sum(1 for _ in fh)
+
+
+def _narrative_finding_count(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return len({match.group(0).lower() for match in NARRATIVE_FINDING_ID_RE.finditer(text)})
+
+
+def _event_error_count(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    errors = 0
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict) and event.get("type") in _AGENT_ERROR_EVENT_TYPES:
+                errors += 1
+    return errors
+
+
+def agent_status_summary(paths: AgentSessionPaths) -> dict[str, int]:
+    """Derived counts so callers can judge whether to proceed without reading files."""
+    return {
+        "final_output_lines": _file_line_count(paths.final_output),
+        "narrative_findings": _narrative_finding_count(paths.final_output),
+        "event_errors": _event_error_count(paths.events),
+    }
 
 
 def agent_session_state_counts(run: Path) -> dict[str, int]:
@@ -40,6 +86,7 @@ def agent_status_payload(paths: AgentSessionPaths, tail_count: int) -> dict[str,
         "exit": read_json_file(paths.exit) if paths.exit.is_file() else None,
         "event_tail": event_tail(paths.events, tail_count),
         "agent_log_path": str(paths.agent_log) if paths.agent_log.is_file() else None,
+        "summary": agent_status_summary(paths),
     }
     return payload
 
@@ -54,6 +101,7 @@ def missing_agent_status_payload(args: argparse.Namespace, message: str) -> dict
         "exit": None,
         "event_tail": [],
         "agent_log_path": None,
+        "summary": {"final_output_lines": 0, "narrative_findings": 0, "event_errors": 0},
         "message": message,
     }
 
@@ -79,6 +127,12 @@ def cmd_agent_status(args: argparse.Namespace) -> int:
             print(f"stderr: {paths.stderr}")
             print(f"agent_log: {paths.agent_log if paths.agent_log.exists() else None}")
             print(f"final_output: {paths.final_output if paths.final_output.exists() else None}")
+            summary = payload["summary"]
+            print(
+                f"summary: final_output_lines={summary['final_output_lines']} "
+                f"narrative_findings={summary['narrative_findings']} "
+                f"event_errors={summary['event_errors']}"
+            )
         return 0
     except FileNotFoundError:
         message = (
