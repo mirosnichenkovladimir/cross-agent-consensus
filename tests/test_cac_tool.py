@@ -649,6 +649,47 @@ class ConsensusToolTests(unittest.TestCase):
             prompt = run / "rounds" / "round-002" / "prompts" / "reviewers" / "reviewer-codex.md"
             self.assertIn("Mode: regression_check", prompt.read_text(encoding="utf-8"))
 
+    def test_prompt_dry_run_resolves_target_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = self.init_run(Path(tmp_name))
+            target = run / "rounds" / "round-001" / "prompts" / "reviewers" / "reviewer-codex.md"
+
+            result = self.run_cli(
+                "prompt",
+                "--run",
+                str(run),
+                "--phase",
+                "reviewer",
+                "--actor",
+                "reviewer-codex",
+                "--round",
+                "round-1",
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertFalse(target.exists(), "dry-run must not write prompt file")
+            self.assertIn("would write prompt:", result.stdout)
+            self.assertIn(str(target), result.stdout)
+            self.assertIn("prompt bytes:", result.stdout)
+
+            # After a real write, dry-run reports "would overwrite".
+            self.write_reviewer_prompt(run)
+            self.assertTrue(target.exists())
+            result = self.run_cli(
+                "prompt",
+                "--run",
+                str(run),
+                "--phase",
+                "reviewer",
+                "--actor",
+                "reviewer-codex",
+                "--round",
+                "round-1",
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("would overwrite prompt:", result.stdout)
+
     def test_prompt_round_id_matching_is_numeric_and_fails_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name))

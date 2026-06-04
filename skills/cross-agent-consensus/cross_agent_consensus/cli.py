@@ -611,6 +611,13 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         output = prompt_target(run, args, records)
         if args.force_draft and "draft" not in output.name:
             output = output.with_name(output.stem + "-draft" + output.suffix)
+        if args.dry_run:
+            status = "would overwrite" if output.exists() else "would write"
+            print(f"{status} prompt: {output}")
+            print(f"prompt bytes: {len(prompt.encode('utf-8'))}")
+            if not pre.ok:
+                print("warning: would be a draft because pre-execution validation failed")
+            return 0
         atomic_write_new(output, prompt)
     except (FileExistsError, ValueError) as exc:
         eprint(f"error: {exc}")
@@ -1104,6 +1111,11 @@ def build_parser() -> argparse.ArgumentParser:
     prompt.add_argument("--review-batch")
     prompt.add_argument("--output")
     prompt.add_argument("--force-draft", action="store_true")
+    prompt.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve and validate the prompt target without writing; prints the path that would be used.",
+    )
     prompt.set_defaults(func=cmd_prompt)
 
     capture = sub.add_parser(
