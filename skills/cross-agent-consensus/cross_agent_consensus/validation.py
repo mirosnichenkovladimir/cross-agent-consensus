@@ -25,7 +25,7 @@ from cross_agent_consensus.models import (
     CheckResult,
     Record,
 )
-from cross_agent_consensus.record_schema import COMMON_FIELDS, ENUMS, REQUIRED_FIELDS
+from cross_agent_consensus.record_schema import COMMON_FIELDS, ENUMS, FIELD_ALIASES, REQUIRED_FIELDS
 from cross_agent_consensus.records import (
     canonical_finding_ids,
     first_record,
@@ -278,11 +278,21 @@ def reviewer_cli_invocation_messages(run: Path, records: list[Record]) -> list[s
 
 def check_records(run: Path) -> CheckResult:
     messages: list[str] = []
+    warnings: list[str] = []
     seen_ids: set[str] = set()
     records = parse_run_records(run)
     if not records:
         messages.append("no protocol records found")
     for record in records:
+        consumed = record.data.get("_aliases_consumed")
+        if isinstance(consumed, list):
+            aliases = FIELD_ALIASES.get(record.record_type, {})
+            for old_field in consumed:
+                new_field = aliases.get(str(old_field), "")
+                warnings.append(
+                    f"deprecation: {record.path}:{record.heading_line}: "
+                    f"{record.record_type}.{old_field} -> {new_field}"
+                )
         for field in COMMON_FIELDS:
             if required_field_missing(record.data, field):
                 messages.append(f"{record.path}:{record.heading_line}: missing common field {field}")
@@ -306,7 +316,8 @@ def check_records(run: Path) -> CheckResult:
             if record.data.get("waiver_rationale_or_null") is None:
                 messages.append(f"{record.path}:{record.heading_line}: waived validator missing rationale")
     messages.extend(conclusion_validation_ordering_messages(records))
-    return CheckResult(not messages, messages or ["record checks passed"])
+    ok = not messages
+    return CheckResult(ok, (warnings + messages) or ["record checks passed"])
 
 
 def check_participants(run: Path) -> CheckResult:

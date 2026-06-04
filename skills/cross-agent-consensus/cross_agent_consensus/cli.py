@@ -26,6 +26,9 @@ from cross_agent_consensus.io import (
     utc_now,
 )
 from cross_agent_consensus.init import build_init_files
+from cross_agent_consensus.normalize import cmd_normalize
+from cross_agent_consensus.record_schema import ENUMS
+from cross_agent_consensus.report import cmd_report
 from cross_agent_consensus.config import (
     CONFIG_SCHEMA_VERSION,
     apply_config_to_init_args,
@@ -68,6 +71,7 @@ from cross_agent_consensus.records import (
     records_by_type,
 )
 from cross_agent_consensus.prompts import (
+    active_review_batches,
     build_prompt,
     prompt_target,
     review_batch_by_id,
@@ -617,6 +621,17 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_single_candidate(flag: str, candidates: list[str], *, hint: str) -> str:
+    if len(candidates) == 1:
+        value = candidates[0]
+        print(f"using {flag} {value} ({hint})")
+        return value
+    raise ValueError(
+        f"reviewer capture requires {flag} "
+        f"(found {len(candidates)} candidates: {', '.join(candidates) or 'none'})"
+    )
+
+
 def cmd_capture(args: argparse.Namespace) -> int:
     run = Path(args.run)
     try:
@@ -629,7 +644,20 @@ def cmd_capture(args: argparse.Namespace) -> int:
             args.round = resolve_existing_round(records, args.round)
         if args.phase == "reviewer" and not args.no_append_record:
             if not args.review_batch:
-                raise ValueError("reviewer capture requires --review-batch")
+                args.review_batch = _resolve_single_candidate(
+                    "--review-batch",
+                    active_review_batches(records, args.round),
+                    hint="only active batch",
+                )
+            if not args.artifact_version:
+                artifacts = [
+                    str(record.data.get("artifact_version_id"))
+                    for record in records_by_type(records, "ArtifactVersion")
+                    if record.data.get("artifact_version_id")
+                ]
+                args.artifact_version = _resolve_single_candidate(
+                    "--artifact-version", artifacts, hint="only ArtifactVersion"
+                )
             reviewer_identity = args.actor or "reviewer"
             if reviewer_capture_exists(records, reviewer_identity, args.review_batch):
                 raise ValueError(
@@ -638,7 +666,7 @@ def cmd_capture(args: argparse.Namespace) -> int:
         raw_path, raw_sha = copy_raw_payload(run, args, records)
         if not args.no_append_record:
             if args.phase == "reviewer":
-                append_reviewer_capture(run, args, raw_path, raw_sha)
+                append_reviewer_capture(run, args, raw_path, raw_sha, records=records)
             elif args.phase == "validator":
                 append_validator_capture(run, args, raw_path, raw_sha)
         print(f"captured raw payload: {raw_path}")
@@ -1100,6 +1128,11 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--waiver-authority")
     capture.add_argument("--waiver-rationale")
     capture.add_argument("--no-append-record", action="store_true")
+    capture.add_argument(
+        "--no-narrative-extract",
+        action="store_true",
+        help="Disable derivation of RawFinding skeletons from narrative R<round>-<REVIEWER>-<NN> ids.",
+    )
     capture.set_defaults(func=cmd_capture)
 
     artifact = sub.add_parser("new-artifact", help="Create a new ArtifactVersion record.")
@@ -1224,9 +1257,35 @@ def build_parser() -> argparse.ArgumentParser:
     players_probe.add_argument("--command", nargs=argparse.REMAINDER)
     players_probe.set_defaults(func=cmd_players_probe)
 
+    normalize = sub.add_parser(
+        "normalize",
+        help="Skeleton NormalizationRecord/CanonicalFinding from captured RawFindings.",
+    )
+    add_common_run_arg(normalize)
+    normalize.add_argument("--round", required=True)
+    normalize.add_argument("--actor", default="orchestrator-consensus-tool")
+    normalize.add_argument("--merge-overlap", action="store_true")
+    normalize.add_argument("--overwrite", action="store_true")
+    normalize.set_defaults(func=cmd_normalize)
+
+    report = sub.add_parser(
+        "report",
+        help="Skeleton report.md with TerminationRecord/FinalReport frontmatter pre-wired.",
+    )
+    add_common_run_arg(report)
+    report.add_argument(
+        "--terminal-condition",
+        required=True,
+        choices=sorted(ENUMS["terminal_condition"]),
+    )
+    report.add_argument("--final-artifact-version")
+    report.add_argument("--actor", default="orchestrator-consensus-tool")
+    report.add_argument("--overwrite", action="store_true")
+    report.set_defaults(func=cmd_report)
+
     terminate = sub.add_parser("terminate", help="Create terminal records after deterministic terminal checks.")
     add_common_run_arg(terminate)
-    terminate.add_argument("--terminal-condition", required=True, choices=["consensus_reached", "round_limit_reached", "escalated_to_human", "aborted"])
+    terminate.add_argument("--terminal-condition", required=True, choices=sorted(ENUMS["terminal_condition"]))
     terminate.add_argument("--final-artifact-version")
     terminate.add_argument("--reason", required=True)
     terminate.set_defaults(func=cmd_terminate)

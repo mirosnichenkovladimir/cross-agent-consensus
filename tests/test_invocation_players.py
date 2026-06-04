@@ -10,6 +10,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "skills" / "cross-agent-con
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from cross_agent_consensus.invocation.adapters import (
+    PLAYER_ALIASES,
     ClaudeCliPlayer,
     CodexCliPlayer,
     GenericCliPlayer,
@@ -99,6 +100,29 @@ class InvocationPlayerTests(unittest.TestCase):
             paths.stdout.write_text(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "FINAL"}}) + "\n")
             adapter.extract_final_output(paths)
             self.assertEqual(paths.final_output.read_text(encoding="utf-8"), "FINAL\n")
+
+
+class PlayerAliasTests(unittest.TestCase):
+    def test_short_aliases_resolve_to_canonical_adapters(self) -> None:
+        self.assertIsInstance(get_player_adapter("codex"), CodexCliPlayer)
+        self.assertIsInstance(get_player_adapter("claude"), ClaudeCliPlayer)
+        self.assertIsInstance(get_player_adapter("generic"), GenericCliPlayer)
+        self.assertIsInstance(get_player_adapter("deepseek"), GenericCliPlayer)
+
+    def test_canonical_player_ids_still_resolve(self) -> None:
+        self.assertIsInstance(get_player_adapter("codex-cli"), CodexCliPlayer)
+        self.assertIsInstance(get_player_adapter("claude-cli"), ClaudeCliPlayer)
+        self.assertIsInstance(get_player_adapter("generic-cli"), GenericCliPlayer)
+
+    def test_unknown_player_error_lists_players_and_aliases(self) -> None:
+        with self.assertRaises(ValueError) as exc:
+            get_player_adapter("nope")
+        message = str(exc.exception)
+        for canonical in ("codex-cli", "claude-cli", "manual", "generic-cli", "deepseek-cli"):
+            self.assertIn(canonical, message)
+        for alias, target in PLAYER_ALIASES.items():
+            self.assertIn(alias, message)
+            self.assertIn(target, message)
 
 
 if __name__ == "__main__":

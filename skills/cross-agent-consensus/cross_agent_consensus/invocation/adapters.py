@@ -332,16 +332,32 @@ class ManualPlayer:
         )
 
 
+PLAYER_ALIASES: dict[str, str] = {
+    "codex": "codex-cli",
+    "claude": "claude-cli",
+    "deepseek": "deepseek-cli",
+    "generic": "generic-cli",
+}
+
+_PLAYER_FACTORIES: dict[str, Any] = {
+    "manual": ManualPlayer,
+    "claude-cli": ClaudeCliPlayer,
+    "codex-cli": CodexCliPlayer,
+    "generic-cli": lambda: GenericCliPlayer("generic-cli"),
+    "deepseek-cli": lambda: GenericCliPlayer("deepseek-cli"),
+}
+
+
 def get_player_adapter(player_id: str) -> GenericCliPlayer | ManualPlayer:
-    if player_id == "manual":
-        return ManualPlayer()
-    if player_id == "claude-cli":
-        return ClaudeCliPlayer()
-    if player_id == "codex-cli":
-        return CodexCliPlayer()
-    if player_id in {"generic-cli", "deepseek-cli"}:
-        return GenericCliPlayer(player_id)
-    raise ValueError(f"unknown player: {player_id}")
+    canonical = PLAYER_ALIASES.get(player_id, player_id)
+    factory = _PLAYER_FACTORIES.get(canonical)
+    if factory is not None:
+        return factory()
+    aliases_hint = ", ".join(f"{alias} ({target})" for alias, target in PLAYER_ALIASES.items())
+    raise ValueError(
+        f"unknown player: {player_id!r}. "
+        f"Available: {', '.join(_PLAYER_FACTORIES)}. Aliases: {aliases_hint}"
+    )
 
 
 def capability_payload(capabilities: PlayerCapabilities) -> dict[str, Any]:

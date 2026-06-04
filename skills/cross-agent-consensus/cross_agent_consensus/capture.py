@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,75 @@ from cross_agent_consensus.markdown_records import frontmatter, parse_records_fr
 from cross_agent_consensus.models import FRESH_REVIEW_MODE, Record
 from cross_agent_consensus.prompts import review_batch_by_id
 from cross_agent_consensus.records import parse_run_records, records_by_type
+
+
+NARRATIVE_FINDING_ID_RE = re.compile(r"\bR(\d+)-([A-Z][A-Z0-9\-]*)-(\d{1,3})\b")
+_NARRATIVE_PARAGRAPH_LIMIT = 1200
+
+
+def derive_raw_findings_from_narrative(
+    raw_text: str,
+    reviewer_identity: str,
+    review_batch_id: str,
+    artifact_version_id: str,
+    run_id: str,
+    created_at: str,
+) -> tuple[list[str], list[str]]:
+    """Scan a reviewer narrative for `R<round>-<REVIEWER>-<NN>` ids and emit RawFinding skeletons.
+
+    Returns a tuple of (raw_finding_ids, rendered_record_sections). Each rendered section is
+    a self-contained `## RawFinding ...` block with frontmatter and a prose template body so
+    the operator can fill claim/evidence after capture.
+    """
+    seen: dict[str, str] = {}
+    for match in NARRATIVE_FINDING_ID_RE.finditer(raw_text):
+        finding_id = match.group(0).lower()
+        if finding_id in seen:
+            continue
+        start = max(0, raw_text.rfind("\n\n", 0, match.start()))
+        end_match = raw_text.find("\n\n", match.end())
+        end = end_match if end_match != -1 else len(raw_text)
+        paragraph = raw_text[start:end].strip()
+        if len(paragraph) > _NARRATIVE_PARAGRAPH_LIMIT:
+            paragraph = paragraph[:_NARRATIVE_PARAGRAPH_LIMIT].rstrip() + "..."
+        seen[finding_id] = paragraph
+    finding_ids: list[str] = list(seen.keys())
+    sections: list[str] = []
+    for finding_id, paragraph in seen.items():
+        sections.append(
+            "\n".join(
+                [
+                    "",
+                    f"## RawFinding {finding_id}",
+                    frontmatter(
+                        {
+                            "record_type": "RawFinding",
+                            "schema_version": "m2-markdown-1",
+                            "run_id": run_id,
+                            "actor_identity": "orchestrator-capture-tool",
+                            "created_at": created_at,
+                            "raw_finding_id": finding_id,
+                            "reviewer_identity": reviewer_identity,
+                            "artifact_version_id": artifact_version_id,
+                            "review_batch_id": review_batch_id,
+                            "location": "# TODO: extract from narrative",
+                            "claim": "# TODO: extract from narrative",
+                            "evidence": "# TODO: extract from narrative",
+                            "severity_or_materiality_claim": "# TODO: extract from narrative",
+                            "scope_classification": "in_scope",
+                            "blocking_status": "non_blocking",
+                            "suggested_fix_or_null": None,
+                        }
+                    ),
+                    "",
+                    "### Narrative Context",
+                    "",
+                    paragraph,
+                    "",
+                ]
+            )
+        )
+    return finding_ids, sections
 
 
 def reviewer_capture_exists(records: list[Record], reviewer_identity: str, review_batch_id: str) -> bool:
@@ -118,10 +188,17 @@ def copy_raw_payload(run: Path, args: Any, records: list[Record] | None = None) 
     raise FileExistsError(f"unable to allocate unique raw payload path under {target_base.parent}")
 
 
-def append_reviewer_capture(run: Path, args: Any, raw_path: Path, raw_sha: str) -> None:
+def append_reviewer_capture(
+    run: Path,
+    args: Any,
+    raw_path: Path,
+    raw_sha: str,
+    records: list[Record] | None = None,
+) -> None:
     if not args.review_batch or not args.artifact_version:
         raise ValueError("reviewer capture requires --review-batch and --artifact-version")
-    records = parse_run_records(run)
+    if records is None:
+        records = parse_run_records(run)
     batch = review_batch_by_id(records, args.review_batch)
     if batch is None:
         raise ValueError(f"review_batch_id not found: {args.review_batch}")
@@ -139,7 +216,19 @@ def append_reviewer_capture(run: Path, args: Any, raw_path: Path, raw_sha: str) 
     rel_raw = raw_path.relative_to(run)
     raw_text = raw_path.read_text(encoding="utf-8", errors="replace")
     is_first_round_independent = round_id == "round-1" and batch.data.get("review_mode") == FRESH_REVIEW_MODE
-    content = "\n".join(
+    derive_narrative = not getattr(args, "no_narrative_extract", False)
+    raw_finding_ids: list[str] = []
+    narrative_sections: list[str] = []
+    if derive_narrative:
+        raw_finding_ids, narrative_sections = derive_raw_findings_from_narrative(
+            raw_text=raw_text,
+            reviewer_identity=reviewer_identity,
+            review_batch_id=args.review_batch,
+            artifact_version_id=args.artifact_version,
+            run_id=run.name,
+            created_at=created_at,
+        )
+    head = "\n".join(
         [
             f"# Review {round_id}: {actor}",
             "",
@@ -155,7 +244,7 @@ def append_reviewer_capture(run: Path, args: Any, raw_path: Path, raw_sha: str) 
                     "reviewer_identity": reviewer_identity,
                     "review_batch_id": args.review_batch,
                     "artifact_version_id": args.artifact_version,
-                    "raw_finding_ids": [],
+                    "raw_finding_ids": raw_finding_ids,
                     "is_first_round_independent": is_first_round_independent,
                 }
             ),
@@ -173,6 +262,7 @@ def append_reviewer_capture(run: Path, args: Any, raw_path: Path, raw_sha: str) 
             "",
         ]
     )
+    content = head + ("".join(narrative_sections) if narrative_sections else "")
     atomic_write_new(target, content)
 
 

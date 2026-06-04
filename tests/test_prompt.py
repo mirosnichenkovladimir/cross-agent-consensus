@@ -11,6 +11,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 
 from cross_agent_consensus.models import Record
 from cross_agent_consensus.prompts import (
+    active_review_batches,
     is_conclusion_validation_batch,
     proposed_conclusion_for_finding,
     resolve_active_round,
@@ -103,6 +104,58 @@ class PromptTests(unittest.TestCase):
 
     def test_table_cell_escapes_backslashes_before_pipes(self) -> None:
         self.assertEqual(table_cell(r"foo\|bar"), r"foo\\\|bar")
+
+    def test_active_review_batches_returns_only_max_round_when_round_is_none(self) -> None:
+        records = [
+            Record(
+                "ReviewBatch",
+                "rb-r1",
+                Path("round-001/round.md"),
+                1,
+                {"review_batch_id": "rb-r1", "round_id": "round-1"},
+            ),
+            Record(
+                "ReviewBatch",
+                "rb-r2-a",
+                Path("round-002/round.md"),
+                1,
+                {"review_batch_id": "rb-r2-a", "round_id": "round-2"},
+            ),
+            Record(
+                "ReviewBatch",
+                "rb-r2-b",
+                Path("round-002/round.md"),
+                2,
+                {"review_batch_id": "rb-r2-b", "round_id": "round-2"},
+            ),
+        ]
+
+        self.assertEqual(active_review_batches(records, None), ["rb-r2-a", "rb-r2-b"])
+
+    def test_active_review_batches_filters_by_explicit_round(self) -> None:
+        records = [
+            Record(
+                "ReviewBatch",
+                "rb-r1",
+                Path("round-001/round.md"),
+                1,
+                {"review_batch_id": "rb-r1", "round_id": "round-1"},
+            ),
+            Record(
+                "ReviewBatch",
+                "rb-r2",
+                Path("round-002/round.md"),
+                1,
+                {"review_batch_id": "rb-r2", "round_id": "round-2"},
+            ),
+        ]
+
+        self.assertEqual(active_review_batches(records, "round-1"), ["rb-r1"])
+        self.assertEqual(active_review_batches(records, "round-002"), ["rb-r2"])
+
+    def test_active_review_batches_returns_empty_when_no_batches(self) -> None:
+        self.assertEqual(active_review_batches([], None), [])
+        self.assertEqual(active_review_batches([], "round-1"), [])
 
     def test_scope_triage_requires_explicit_conclusion_validation_purpose(self) -> None:
         batch = Record(

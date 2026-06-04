@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cross_agent_consensus.models import Record
-from cross_agent_consensus.record_schema import ID_FIELDS, KNOWN_RECORD_TYPES
+from cross_agent_consensus.record_schema import FIELD_ALIASES, ID_FIELDS, KNOWN_RECORD_TYPES
 
 
 SCALAR_NULLS = {"null", "~"}
@@ -143,11 +143,26 @@ def find_frontmatter_after(text: str, start: int) -> tuple[str, int, int] | None
     first_start = start + first.start()
     first_end = start + first.end()
     second = re.search(r"^---\s*$", text[first_end:], re.MULTILINE)
-    if not second:
-        return None
+    if second is None:
+        next_heading = RECORD_HEADING_RE.search(text, first_end)
+        end = next_heading.start() if next_heading else len(text)
+        return text[first_end:end], first_start, end
     second_start = first_end + second.start()
     second_end = first_end + second.end()
     return text[first_end:second_start], first_start, second_end
+
+
+def _apply_field_aliases(record_type: str, data: dict[str, Any]) -> None:
+    aliases = FIELD_ALIASES.get(record_type)
+    if not aliases:
+        return
+    consumed: list[str] = []
+    for old_key, new_key in aliases.items():
+        if old_key in data and new_key not in data:
+            data[new_key] = data.pop(old_key)
+            consumed.append(old_key)
+    if consumed:
+        data["_aliases_consumed"] = consumed
 
 
 def parse_records_from_file(path: Path) -> list[Record]:
@@ -166,6 +181,7 @@ def parse_records_from_file(path: Path) -> list[Record]:
         data = parse_yaml_subset(block)
         heading_line = text.count("\n", 0, match.start()) + 1
         record_type = data.get("record_type") or match.group("record_type")
+        _apply_field_aliases(str(record_type), data)
         id_field = ID_FIELDS.get(str(record_type))
         record_id = data.get(id_field) if id_field else None
         if not record_id:
@@ -178,6 +194,7 @@ def parse_records_from_file(path: Path) -> list[Record]:
             if second:
                 end = 4 + second.start()
                 data = parse_yaml_subset(text[4:end])
+                _apply_field_aliases(str(data.get("record_type")), data)
                 if data.get("record_type") == "ArtifactVersion":
                     records.append(
                         Record(

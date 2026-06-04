@@ -81,6 +81,39 @@ def review_batch_by_id(records: list[Record], review_batch_id: str) -> Record | 
     return None
 
 
+def active_review_batches(records: list[Record], round_value: str | None) -> list[str]:
+    """Return ReviewBatch ids for the resolved round, in record order.
+
+    Falls back to the latest round in the run when ``round_value`` is omitted.
+    Used by `consensus capture` to auto-resolve `--review-batch` when only one
+    batch is active for the round.
+    """
+    batches = records_by_type(records, "ReviewBatch")
+    if not batches:
+        return []
+    if round_value is None:
+        wanted = max(
+            (record_round_number(record) for record in batches if record.data.get("round_id")),
+            default=None,
+        )
+        if wanted is None:
+            return []
+    else:
+        wanted = round_number(round_value)
+    result: list[str] = []
+    for record in batches:
+        try:
+            current = round_number(str(record.data.get("round_id")))
+        except ValueError:
+            continue
+        if current != wanted:
+            continue
+        batch_id = record.data.get("review_batch_id")
+        if batch_id and str(batch_id) not in result:
+            result.append(str(batch_id))
+    return result
+
+
 def selected_review_batch(records: list[Record], args: Any) -> Record | None:
     return select_review_batch(records, getattr(args, "round", None), getattr(args, "review_batch", None))
 

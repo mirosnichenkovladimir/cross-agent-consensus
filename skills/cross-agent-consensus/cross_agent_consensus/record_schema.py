@@ -218,6 +218,17 @@ ENUMS = {
     "terminal_condition": {"consensus_reached", "round_limit_reached", "escalated_to_human", "aborted"},
 }
 
+FIELD_ALIASES: dict[str, dict[str, str]] = {
+    "RawFinding": {
+        "suggested_fix": "suggested_fix_or_null",
+        "severity": "severity_or_materiality_claim",
+        "severity_or_null": "severity_or_materiality_claim",
+    },
+    "FinalReport": {
+        "target_artifact_version_id": "final_artifact_version_id_or_null",
+    },
+}
+
 KNOWN_RECORD_TYPES = set(REQUIRED_FIELDS)
 
 ID_FIELDS = {

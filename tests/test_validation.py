@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,8 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "skills" / "cross-agent-consensus"
 sys.path.insert(0, str(PACKAGE_ROOT))
 
+from cross_agent_consensus.markdown_records import frontmatter
 from cross_agent_consensus.models import Record
 from cross_agent_consensus.validation import (
+    check_records,
     remediation_cap_blockers,
     required_field_missing,
     unresolved_blockers,
@@ -102,6 +105,55 @@ class ValidationTests(unittest.TestCase):
         blockers = remediation_cap_blockers(records, ["CXR-001"], "reviewer-codex")
 
         self.assertEqual(blockers, [("CXR-001", "reviewer-codex", 2, "still_valid", 2)])
+
+
+    def test_check_records_emits_deprecation_for_field_alias(self) -> None:
+        """Records using aliased field names should surface deprecation: warnings in check_records output."""
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name) / "sample"
+            run.mkdir()
+            path = run / "raw.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## RawFinding rf-001",
+                        frontmatter(
+                            {
+                                "record_type": "RawFinding",
+                                "schema_version": "m2-markdown-1",
+                                "run_id": "sample",
+                                "actor_identity": "orchestrator",
+                                "created_at": "2026-06-01T00:00:00Z",
+                                "raw_finding_id": "rf-001",
+                                "reviewer_identity": "rev",
+                                "artifact_version_id": "v1",
+                                "review_batch_id": "rb-1",
+                                "location": "loc",
+                                "claim": "x",
+                                "evidence": "e",
+                                "severity": "high",
+                                "scope_classification": "in_scope",
+                                "blocking_status": "blocking",
+                                "suggested_fix": "do the thing",
+                            }
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = check_records(run)
+
+        deprecation_lines = [msg for msg in result.messages if msg.startswith("deprecation:")]
+        self.assertTrue(
+            any("RawFinding.severity -> severity_or_materiality_claim" in msg for msg in deprecation_lines),
+            f"severity deprecation missing from {deprecation_lines!r}",
+        )
+        self.assertTrue(
+            any("RawFinding.suggested_fix -> suggested_fix_or_null" in msg for msg in deprecation_lines),
+            f"suggested_fix deprecation missing from {deprecation_lines!r}",
+        )
 
 
 if __name__ == "__main__":
