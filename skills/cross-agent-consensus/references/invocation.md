@@ -96,6 +96,31 @@ Expected first actions:
 4. Capture raw implementation output and the resulting patch/artifact locator in the run folder.
 5. Run or request validation/review and capture raw outputs before normalization.
 
+## Long-Running Invocation: Peek-Loop Default
+
+`scripts/consensus invoke-agent` blocks foreground while the named CLI runs. For reviewer/author/validator invocations expected to exceed ~60s, the supported pattern is background + peek so the orchestrator can stream progress and retain `agent-cancel`. Foreground blocking is permitted only for sub-60s invocations.
+
+Sketch (per-host transport varies):
+
+```text
+# 1. Launch in background (host-specific; tmux/nohup/&).
+scripts/consensus invoke-agent --run <run> --actor <actor> --player <player> \
+  --phase reviewer --prompt <prompt> --raw-output <raw> \
+  --approved --command -- <argv> &
+
+# 2. Poll with peek (or agent-status) at the configured interval.
+while true; do
+  scripts/consensus agent-peek --run <run> --actor <actor> --tail 40
+  scripts/consensus agent-status --run <run> --actor <actor> --json \
+    | jq -r '.state' | grep -qE '^(completed|failed|cancelled)$' && break
+  sleep "${PEEK_INTERVAL:-180}"
+done
+
+# 3. Treat completed/failed/cancelled as terminal; agent-cancel on operator interrupt.
+```
+
+`invocation.peek.interval_seconds` (default 180) defines the polling cadence. The orchestrator should print a one-line progress update each iteration so the operator is not left blind during multi-minute reviews.
+
 ## Configuration Quick Reference
 
 Config files use `schema_version: cross-agent-consensus-config-1`. Package defaults are in `config/defaults.yaml`; personal config belongs in `config/config.local.yaml`; project config belongs in `.cross-agent-consensus.yaml`. Task files use `schema_version: cross-agent-consensus-task-1` and may contain a run-scoped `config:` mapping.

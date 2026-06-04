@@ -29,6 +29,21 @@ The installed package exposes a strict semantic version in `MAJOR.MINOR.PATCH` f
 
 The supported pinned invocation spelling is `cac@X.Y.Z: <task>` when a host can dispatch multiple installed versions. If host-level dispatch is unavailable, a pinned invocation must fail clearly when `X.Y.Z` differs from the installed version.
 
+## Long-Running Invocation: Peek-Loop Default
+
+`scripts/consensus invoke-agent` blocks foreground while the named CLI runs. For reviewer/author/validator runs expected to take more than ~60s (every realistic Codex or Claude review), blocking foreground discards the entire M2 supervised-invocation value: the orchestrator becomes blind to live state, cannot surface progress to the operator, and cannot `agent-cancel` if something goes wrong.
+
+The default orchestrator pattern for long-running `invoke-agent` MUST be background + peek:
+
+1. Launch `invoke-agent` in the background (e.g. via the host's background-task mechanism or `nohup ... &`).
+2. Loop on `scripts/consensus agent-peek --run <run> --actor <actor>` (or `agent-status`) at the configured interval (`invocation.peek.interval_seconds`, default 180s). Report a one-line progress update to the operator each iteration.
+3. Treat `state == completed`, `failed`, `cancelled`, or stale-monitor as terminal; act accordingly.
+4. Keep `agent-cancel` available throughout; if the operator interrupts, cancel the session before continuing.
+
+Foreground `invoke-agent` is acceptable only when the expected runtime is bounded under ~60s (e.g. a `--dry-run` invocation, or a deterministic validator). The `--heartbeat-interval-seconds` flag exists for foreground use but does not by itself satisfy the supervision requirement; the peek-loop pattern remains preferred.
+
+See `references/invocation.md` for the per-host peek-loop sketch.
+
 ## Operator Approval Handshake
 
 `scripts/consensus invoke-agent` is fail-closed without `--approved`; the Orchestrator decides whether to pass it. The skill rule is:
