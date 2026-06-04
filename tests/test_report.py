@@ -11,9 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "skills" / "cross-agent-consensus"
 sys.path.insert(0, str(PACKAGE_ROOT))
 
+from cross_agent_consensus.layout import FEEDBACK_FILENAME
 from cross_agent_consensus.markdown_records import frontmatter, parse_records_from_file
 from cross_agent_consensus.records import records_by_type
-from cross_agent_consensus.report import build_report_skeleton, cmd_report
+from cross_agent_consensus.report import (
+    FEEDBACK_SECTIONS,
+    build_feedback_skeleton,
+    build_report_skeleton,
+    cmd_report,
+)
 
 
 def _write_run_with_canonical(tmp_root: Path, canonical_specs: list[dict]) -> Path:
@@ -49,6 +55,35 @@ def _write_run_with_canonical(tmp_root: Path, canonical_specs: list[dict]) -> Pa
         sections.append("")
     (run / "run.md").write_text("\n".join(sections), encoding="utf-8")
     return run
+
+
+def _append_config_resolution(run: Path, *, feedback_enabled: bool) -> None:
+    """Append a minimal ConfigResolution record carrying `feedback.enabled`."""
+    block = "\n".join(
+        [
+            "",
+            "## ConfigResolution config-resolution-sample",
+            frontmatter(
+                {
+                    "record_type": "ConfigResolution",
+                    "schema_version": "m2-markdown-1",
+                    "run_id": run.name,
+                    "actor_identity": "orchestrator",
+                    "created_at": "2026-06-01T00:00:00Z",
+                    "config_resolution_id": "config-resolution-sample",
+                    "effective_values": {
+                        "feedback.enabled": {
+                            "value": feedback_enabled,
+                            "source_layer": "installed_defaults",
+                        },
+                    },
+                }
+            ),
+            "",
+        ]
+    )
+    with (run / "run.md").open("a", encoding="utf-8") as handle:
+        handle.write(block)
 
 
 class ReportTests(unittest.TestCase):
@@ -130,6 +165,77 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(len(final), 1)
         self.assertEqual(final[0].data["final_artifact_version_id_or_null"], "v3")
         self.assertNotIn("target_artifact_version_id", final[0].data)
+
+    def test_build_feedback_skeleton_renders_all_fixed_sections(self) -> None:
+        body = build_feedback_skeleton("sample")
+
+        self.assertIn("# CAC run feedback — sample", body)
+        for section in FEEDBACK_SECTIONS:
+            self.assertIn(f"## {section}", body)
+            self.assertIn("- _none_", body)
+
+    def test_cmd_report_writes_feedback_when_config_resolution_enables_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run_with_canonical(
+                Path(tmp_name),
+                [{"canonical_finding_id": "cf-001"}],
+            )
+            _append_config_resolution(run, feedback_enabled=True)
+            args = argparse.Namespace(
+                run=str(run),
+                terminal_condition="consensus_reached",
+                final_artifact_version="v2",
+                actor="orchestrator-consensus-tool",
+                overwrite=False,
+            )
+
+            self.assertEqual(cmd_report(args), 0)
+            self.assertTrue((run / FEEDBACK_FILENAME).is_file())
+            content = (run / FEEDBACK_FILENAME).read_text(encoding="utf-8")
+            self.assertIn("# CAC run feedback —", content)
+            for section in FEEDBACK_SECTIONS:
+                self.assertIn(f"## {section}", content)
+
+    def test_cmd_report_omits_feedback_when_config_resolution_disables_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run_with_canonical(
+                Path(tmp_name),
+                [{"canonical_finding_id": "cf-001"}],
+            )
+            _append_config_resolution(run, feedback_enabled=False)
+            args = argparse.Namespace(
+                run=str(run),
+                terminal_condition="consensus_reached",
+                final_artifact_version="v2",
+                actor="orchestrator-consensus-tool",
+                overwrite=False,
+            )
+
+            self.assertEqual(cmd_report(args), 0)
+            self.assertFalse((run / FEEDBACK_FILENAME).exists())
+
+    def test_cmd_report_preserves_existing_feedback_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run_with_canonical(
+                Path(tmp_name),
+                [{"canonical_finding_id": "cf-001"}],
+            )
+            _append_config_resolution(run, feedback_enabled=True)
+            existing = run / FEEDBACK_FILENAME
+            existing.write_text("# previously written by agent\n", encoding="utf-8")
+            args = argparse.Namespace(
+                run=str(run),
+                terminal_condition="consensus_reached",
+                final_artifact_version="v2",
+                actor="orchestrator-consensus-tool",
+                overwrite=False,
+            )
+
+            self.assertEqual(cmd_report(args), 0)
+            self.assertEqual(
+                existing.read_text(encoding="utf-8"),
+                "# previously written by agent\n",
+            )
 
     def test_cmd_report_writes_file_and_overwrite_replaces_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

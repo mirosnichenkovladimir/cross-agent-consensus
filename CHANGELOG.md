@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.9.0] - 2026-06-04
+
+### Added
+- Optional run-feedback artifact. With `feedback.enabled: true` (top-level key
+  in `config/defaults.yaml` or a local override), `scripts/consensus report`
+  also writes `runs/<run_dir>/cac-run-feedback.md` — a skeleton with four fixed
+  H2 sections (`Performance anomalies`, `Critical errors`,
+  `Small bugs / rough edges`, `Logic gaps`). The orchestrator-agent overwrites
+  the bullets before `terminate`; empty sections keep `_none_` so the artifact
+  shape is uniform across runs. Off by default; opt-in for debugging and
+  skill-improvement sessions.
+- `feedback.enabled` is now part of `ConfigResolution.effective_values`, so the
+  flag's effective layer (installed_defaults vs user_local vs project) is
+  recorded alongside other config provenance.
+
+### References
+- Design: `plans_and_designs/cac-design-notes/cac-feedback-debug.md`.
+
 ## [0.8.3] - 2026-06-04
 
 ### Changed

@@ -42,3 +42,5 @@ invocation:
     tail: 80
     snippet_chars: 160
     monitor_stale_seconds: 30
+feedback:
+  enabled: false

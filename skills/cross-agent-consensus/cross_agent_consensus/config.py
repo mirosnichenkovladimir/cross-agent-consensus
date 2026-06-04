@@ -201,7 +201,7 @@ def find_secret_like_values(data: Any, path: str = "") -> list[str]:
 def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool, strict: bool) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     errors: list[str] = []
-    allowed_top = {"schema_version", "defaults", "participants", "reviewer_clis", "invocation"}
+    allowed_top = {"schema_version", "defaults", "participants", "reviewer_clis", "invocation", "feedback"}
     schema_version = data.get("schema_version")
     if schema_version != CONFIG_SCHEMA_VERSION:
         errors.append(f"{source}: schema_version must be {CONFIG_SCHEMA_VERSION}")
@@ -316,6 +316,18 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
             scope = unattended.get("scope")
             if not (isinstance(scope, list) and scope and all(isinstance(item, str) for item in scope)):
                 errors.append(f"{source}: invocation.unattended_invocation.scope must be a non-empty string list when enabled")
+    feedback = data.get("feedback", {})
+    if feedback is not None and not isinstance(feedback, dict):
+        errors.append(f"{source}: feedback must be a mapping")
+    elif isinstance(feedback, dict):
+        allowed_feedback = {"enabled"}
+        unknown_feedback = sorted(set(feedback) - allowed_feedback)
+        if unknown_feedback:
+            message = f"{source}: unknown feedback keys: {', '.join(unknown_feedback)}"
+            (errors if strict else warnings).append(message)
+        enabled = feedback.get("enabled")
+        if enabled is not None and not isinstance(enabled, bool):
+            errors.append(f"{source}: feedback.enabled must be a boolean")
     if persistent and contains_enabled_unattended(data):
         errors.append(f"{source}: persistent config must not enable unattended_invocation")
     secret_messages = [f"{source}: {message}" for message in find_secret_like_values(data)]
@@ -622,6 +634,9 @@ def consumed_config_values(args: argparse.Namespace, resolution: ConfigResolutio
         for key in ["require_invocation_ready", "direct_reviewer_cli"]:
             if key in invocation:
                 consumed[f"invocation.{key}"] = invocation[key]
+    feedback = resolution.effective.get("feedback", {})
+    if isinstance(feedback, dict) and "enabled" in feedback:
+        consumed["feedback.enabled"] = bool(feedback["enabled"])
     reviewer_clis = resolution.effective.get("reviewer_clis", {})
     if isinstance(reviewer_clis, dict):
         for reviewer in args.reviewer or []:

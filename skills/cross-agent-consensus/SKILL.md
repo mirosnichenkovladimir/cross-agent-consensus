@@ -314,6 +314,10 @@ At terminal state, report:
 - unresolved canonical finding IDs, if any;
 - backlog location for non-blocking, deferred, and out-of-scope items.
 
+## Run Feedback (opt-in)
+
+When `feedback.enabled: true` in `config/defaults.yaml` (or a local override), `scripts/consensus report` also writes `runs/<run_dir>/cac-run-feedback.md` — a skeleton with four fixed H2 sections (`Performance anomalies`, `Critical errors`, `Small bugs / rough edges`, `Logic gaps`). Before running `scripts/consensus terminate`, overwrite the bullets in each section with observations from this run. Leave a section's bullet as `_none_` when there is nothing to report; do not delete sections. This file is a feedback channel to skill maintainers; it is unrelated to the protocol records and is not consumed by validation.
+
 ## Reference Files
 
 - `references/invocation.md`: portable `CAC`/`cac` alias behavior and out-of-box host contract.

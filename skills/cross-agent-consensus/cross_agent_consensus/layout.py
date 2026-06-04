@@ -12,6 +12,7 @@ DEFAULT_LAYOUT = "round-first"
 ROUND_FIRST_LAYOUT_VERSION = "round-first-1"
 LEDGER_LAYOUT_VERSION = "m2-ledger-1"
 REPORT_FILENAME = "report.md"
+FEEDBACK_FILENAME = "cac-run-feedback.md"
 
 
 def detect_run_layout(run: Path) -> str:

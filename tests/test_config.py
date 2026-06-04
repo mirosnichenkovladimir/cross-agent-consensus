@@ -96,6 +96,46 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("project: invocation.peek.snippet_chars must be an integer between 40 and 500", errors)
         self.assertIn("project: invocation.peek.monitor_stale_seconds must be a number > 0", errors)
 
+    def test_feedback_config_accepts_enabled_boolean(self) -> None:
+        warnings, errors = validate_config_shape(
+            {
+                "schema_version": CONFIG_SCHEMA_VERSION,
+                "feedback": {"enabled": True},
+            },
+            source="project",
+            persistent=True,
+            strict=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    def test_feedback_config_rejects_non_boolean_enabled(self) -> None:
+        _, errors = validate_config_shape(
+            {
+                "schema_version": CONFIG_SCHEMA_VERSION,
+                "feedback": {"enabled": "yes"},
+            },
+            source="project",
+            persistent=True,
+            strict=True,
+        )
+
+        self.assertIn("project: feedback.enabled must be a boolean", errors)
+
+    def test_feedback_config_rejects_unknown_keys_in_strict_mode(self) -> None:
+        _, errors = validate_config_shape(
+            {
+                "schema_version": CONFIG_SCHEMA_VERSION,
+                "feedback": {"enabled": True, "destination": "/tmp/x"},
+            },
+            source="project",
+            persistent=True,
+            strict=True,
+        )
+
+        self.assertIn("project: unknown feedback keys: destination", errors)
+
     def test_cli_config_overrides_installed_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             resolution, task_data = resolve_config(

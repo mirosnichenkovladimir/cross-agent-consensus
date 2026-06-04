@@ -7,12 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from cross_agent_consensus.io import atomic_write_new, eprint, utc_now
-from cross_agent_consensus.layout import REPORT_FILENAME
+from cross_agent_consensus.layout import FEEDBACK_FILENAME, REPORT_FILENAME
 from cross_agent_consensus.markdown_records import frontmatter
 from cross_agent_consensus.models import Record
-from cross_agent_consensus.records import parse_run_records, records_by_type
+from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
 from cross_agent_consensus.termination import field_value
 from cross_agent_consensus.validation import unresolved_blockers, validator_status
+
+
+FEEDBACK_SECTIONS: tuple[str, ...] = (
+    "Performance anomalies",
+    "Critical errors",
+    "Small bugs / rough edges",
+    "Logic gaps (cases the skill does not cover well)",
+)
+FEEDBACK_EMPTY_PLACEHOLDER = "_none_"
 
 
 _TERMINATION_ID = "termination-001"
@@ -180,6 +189,50 @@ def build_report_skeleton(
     return "\n".join(lines)
 
 
+def feedback_enabled_for_run(records: list[Record]) -> bool:
+    """Read `feedback.enabled` from the run's ConfigResolution record.
+
+    Returns False when there is no ConfigResolution, the field is absent,
+    or the value is not truthy. The feedback artifact is opt-in.
+    """
+    resolution = first_record(records, "ConfigResolution")
+    if resolution is None:
+        return False
+    effective = resolution.data.get("effective_values") or {}
+    if not isinstance(effective, dict):
+        return False
+    entry = effective.get("feedback.enabled")
+    if isinstance(entry, dict):
+        value = entry.get("value")
+    else:
+        value = entry
+    return bool(value)
+
+
+def build_feedback_skeleton(run_id: str) -> str:
+    """Render the empty feedback skeleton with the four fixed H2 sections."""
+    lines: list[str] = [f"# CAC run feedback — {run_id}", ""]
+    for section in FEEDBACK_SECTIONS:
+        lines.extend([f"## {section}", "", f"- {FEEDBACK_EMPTY_PLACEHOLDER}", ""])
+    return "\n".join(lines)
+
+
+def _write_feedback_skeleton(run: Path, *, overwrite: bool) -> Path | None:
+    """Write the feedback skeleton to `runs/<run_dir>/cac-run-feedback.md`.
+
+    Returns the target path when written, None when the file already exists
+    and `overwrite` is False (existing operator content is preserved).
+    """
+    target = run / FEEDBACK_FILENAME
+    if target.exists() and not overwrite:
+        return None
+    body = build_feedback_skeleton(run.name)
+    if target.exists() and overwrite:
+        target.unlink()
+    atomic_write_new(target, body)
+    return target
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     run = Path(args.run)
     try:
@@ -194,6 +247,13 @@ def cmd_report(args: argparse.Namespace) -> int:
             target.unlink()
         atomic_write_new(target, body)
         print(f"wrote report skeleton: {target}")
+        records = parse_run_records(run)
+        if feedback_enabled_for_run(records):
+            feedback_target = _write_feedback_skeleton(run, overwrite=args.overwrite)
+            if feedback_target is not None:
+                print(f"wrote feedback skeleton: {feedback_target}")
+            else:
+                print(f"feedback skeleton already exists: {run / FEEDBACK_FILENAME}")
         return 0
     except FileExistsError as exc:
         eprint(f"error: {exc}")
