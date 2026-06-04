@@ -8,10 +8,11 @@ SOURCE_DIR="$REPO_ROOT/skills/cross-agent-consensus"
 TARGET=""
 UPDATE=0
 ALLOW_MISSING_FIRST_CLASS=0
+RUN_SELFTEST=1
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-cac --target hermes|codex|claude|all [--update] [--allow-missing-first-class]
+Usage: scripts/install-cac --target hermes|codex|claude|all [--update] [--allow-missing-first-class] [--no-selftest]
 
 Installs the cross-agent-consensus skill package.
 
@@ -19,7 +20,14 @@ Options:
   --target TARGET                 hermes, codex, claude, or all
   --update                        Update managed files when target copies are unmodified
   --allow-missing-first-class     With --target all, skip missing Hermes/Codex instead of failing
+  --selftest                      Run `consensus selftest --invocation --host <target>` after install (default)
+  --no-selftest                   Skip the post-install invocation selftest
   -h, --help                      Show this help
+
+Post-install selftest exit codes (per target):
+  0  selftest_ok       — install passed every check
+  2  selftest_warning  — mixed result (one host healthy, another broken); install is preserved
+  3  selftest_failed   — install is unusable; treated as installer failure
 EOF
 }
 
@@ -340,6 +348,84 @@ PY
   printf '__TARGET_STATUS=%s\n' "${status:-installed}"
 }
 
+# Invoke `consensus selftest --invocation --host <target>` against the just-installed
+# package. Uses CAC_SELFTEST_HOME_OVERRIDE so a custom --target home (e.g. HERMES_HOME)
+# is honoured, but only when the home basename matches `.<target>` (the convention
+# `_existing_install` encodes in selftest.py).
+#
+# Emits two trailing tokens on stdout for the caller to scrape:
+#   __SELFTEST_STATUS=<token>   one of: ok, warning, failed, skipped_disabled,
+#                               skipped_no_python, skipped_layout, error_<rc>
+#   __SELFTEST_RC=<int>         raw exit code from `consensus selftest` (or empty)
+#
+# Return code:
+#   0 — selftest passed, was skipped, or only emitted a warning
+#   3 — selftest reported a hard failure (exit 3); caller should treat as install failure
+run_selftest() {
+  local target="$1"
+  local home="$2"
+  local home_basename
+  home_basename="$(basename -- "$home")"
+
+  if [[ $RUN_SELFTEST -ne 1 ]]; then
+    printf '__SELFTEST_STATUS=skipped_disabled\n'
+    printf '__SELFTEST_RC=\n'
+    return 0
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "post-install selftest skipped for $target: python3 not on PATH"
+    printf '__SELFTEST_STATUS=skipped_no_python\n'
+    printf '__SELFTEST_RC=\n'
+    return 0
+  fi
+
+  if [[ "$home_basename" != ".$target" ]]; then
+    warn "post-install selftest skipped for $target: home '$home' does not follow the \$HOME/.${target} convention; selftest --host ${target} cannot be pointed at it"
+    printf '__SELFTEST_STATUS=skipped_layout\n'
+    printf '__SELFTEST_RC=\n'
+    return 0
+  fi
+
+  local override_root
+  override_root="$(dirname -- "$home")"
+  local pkg_dir="${home%/}/skills/cross-agent-consensus"
+
+  printf '\n-- Running post-install selftest (--host %s) --\n' "$target"
+
+  local rc
+  CAC_SELFTEST_HOME_OVERRIDE="$override_root" PYTHONPATH="$pkg_dir" \
+    python3 -c "
+import sys
+from cross_agent_consensus.cli import main
+sys.exit(main(['selftest','--invocation','--host','$target']))
+"
+  rc=$?
+
+  printf '__SELFTEST_RC=%s\n' "$rc"
+  case "$rc" in
+    0)
+      printf '__SELFTEST_STATUS=ok\n'
+      return 0
+      ;;
+    2)
+      warn "post-install selftest reported a warning (exit 2) for $target — install preserved"
+      printf '__SELFTEST_STATUS=warning\n'
+      return 0
+      ;;
+    3)
+      err "post-install selftest reported a hard failure (exit 3) for $target"
+      printf '__SELFTEST_STATUS=failed\n'
+      return 3
+      ;;
+    *)
+      err "post-install selftest exited with unexpected code $rc for $target"
+      printf '__SELFTEST_STATUS=error_%s\n' "$rc"
+      return "$rc"
+      ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target)
@@ -360,6 +446,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-missing-first-class)
       ALLOW_MISSING_FIRST_CLASS=1
+      shift
+      ;;
+    --selftest)
+      RUN_SELFTEST=1
+      shift
+      ;;
+    --no-selftest)
+      RUN_SELFTEST=0
       shift
       ;;
     -h|--help)
@@ -442,7 +536,16 @@ for target in "${targets[@]}"; do
   fi
   status="$(printf '%s\n' "$output" | awk -F= '/^__TARGET_STATUS=/{print $2}' | tail -n 1)"
   printf '%s\n' "$output" | sed '/^__TARGET_STATUS=/d'
-  results+=("$target: ${status:-installed} (${home%/}/skills/cross-agent-consensus)")
+
+  selftest_output="$(run_selftest "$target" "$home")"
+  selftest_rc=$?
+  selftest_status="$(printf '%s\n' "$selftest_output" | awk -F= '/^__SELFTEST_STATUS=/{print $2}' | tail -n 1)"
+  printf '%s\n' "$selftest_output" | sed '/^__SELFTEST_STATUS=/d; /^__SELFTEST_RC=/d'
+  if [[ $selftest_rc -ne 0 ]]; then
+    overall=1
+  fi
+
+  results+=("$target: ${status:-installed} (${home%/}/skills/cross-agent-consensus) [selftest:${selftest_status:-skipped}]")
 done
 
 printf '\nSummary:\n'
