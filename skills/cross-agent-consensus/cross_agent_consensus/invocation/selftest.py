@@ -75,20 +75,30 @@ def _parse_frontmatter_description(skill_md_path: Path) -> str | None:
     return match.group(1).strip() if match else None
 
 
+INSTALLED_STATE_FILENAME = ".cross-agent-consensus-managed.json"
+
+
 def _check_manifest_integrity(install_path: Path) -> list[str]:
-    manifest_path = install_path / "managed-manifest.json"
-    if not manifest_path.is_file():
-        return [f"managed-manifest.json not found at {install_path}"]
+    """Verify the installed package against the installer's state file.
+
+    `scripts/install-cac` writes `.cross-agent-consensus-managed.json` after a
+    successful install, recording the sha256 of each file as it was placed on
+    disk. That is the integrity contract — re-hash each managed file in place
+    and compare against `installed_sha256`.
+    """
+    state_path = install_path / INSTALLED_STATE_FILENAME
+    if not state_path.is_file():
+        return [f"{INSTALLED_STATE_FILENAME} not found at {install_path}"]
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        return [f"managed-manifest.json failed to parse: {exc}"]
+        return [f"{INSTALLED_STATE_FILENAME} failed to parse: {exc}"]
     messages: list[str] = []
-    for item in manifest.get("managed_files", []):
+    for item in state.get("managed_files", []):
         rel = item.get("path")
-        declared = item.get("sha256")
+        declared = item.get("installed_sha256")
         if not rel or not declared:
-            messages.append(f"manifest entry missing path/sha256: {item}")
+            messages.append(f"state entry missing path/installed_sha256: {item}")
             continue
         target = install_path / rel
         if not target.is_file():

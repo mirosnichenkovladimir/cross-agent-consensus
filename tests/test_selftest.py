@@ -47,17 +47,22 @@ def _stage_install(home: Path, host: str, *, description: str | None = None, bro
     ]
     skill_md = install / "SKILL.md"
     skill_md.write_text("\n".join(skill_md_lines), encoding="utf-8")
-    skill_md_hash = hashlib.sha256(skill_md.read_bytes()).hexdigest() if not broken_manifest else "0" * 64
-    manifest = {
+    skill_md_source_hash = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+    skill_md_installed_hash = skill_md_source_hash if not broken_manifest else "0" * 64
+    state = {
         "package": "cross-agent-consensus",
-        "schema_version": "m2-managed-manifest-1",
-        "source_root": "skills/cross-agent-consensus",
-        "hash_algorithm": "sha256",
+        "installed_at": "2026-01-01T00:00:00Z",
         "managed_files": [
-            {"path": "SKILL.md", "sha256": skill_md_hash},
+            {
+                "path": "SKILL.md",
+                "installed_sha256": skill_md_installed_hash,
+                "source_sha256": skill_md_source_hash,
+            },
         ],
     }
-    (install / "managed-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (install / ".cross-agent-consensus-managed.json").write_text(
+        json.dumps(state, indent=2), encoding="utf-8"
+    )
     return install
 
 
