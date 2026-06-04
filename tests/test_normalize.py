@@ -164,6 +164,27 @@ class NormalizeTests(unittest.TestCase):
             args.overwrite = True
             self.assertEqual(cmd_normalize(args), 0)
 
+    def test_cmd_normalize_silently_replaces_init_stub_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run(Path(tmp_name), [{"raw_finding_id": "rf-001"}])
+            target = run / "rounds" / "round-001" / "normalization.md"
+            # init writes this exact stub; first-pass `normalize` must replace it
+            # without requiring --overwrite.
+            target.write_text(
+                "# Normalization\n\nNo normalization records have been recorded for this round.\n",
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                run=str(run),
+                round="round-1",
+                actor="orchestrator-consensus-tool",
+                merge_overlap=False,
+                overwrite=False,
+            )
+
+            self.assertEqual(cmd_normalize(args), 0)
+            self.assertIn("## NormalizationRecord ", target.read_text(encoding="utf-8"))
+
     def test_skeleton_with_no_raw_findings_returns_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = _write_run(Path(tmp_name), [])

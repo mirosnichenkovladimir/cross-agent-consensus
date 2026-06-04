@@ -16,6 +16,17 @@ from cross_agent_consensus.records import canonical_finding_ids, parse_run_recor
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# Exact content `init` writes to rounds/<round>/normalization.md; safe to overwrite silently
+# on the first `normalize` call because it has no authored content to preserve.
+_INIT_STUB_NORMALIZATION = "# Normalization\n\nNo normalization records have been recorded for this round.\n"
+
+
+def _is_init_stub_normalization(path: Path) -> bool:
+    try:
+        return path.read_text(encoding="utf-8") == _INIT_STUB_NORMALIZATION
+    except OSError:
+        return False
+
 
 def _normalize_claim_key(value: Any) -> str:
     text = _WHITESPACE_RE.sub(" ", str(value or "").strip().lower())
@@ -245,7 +256,7 @@ def cmd_normalize(args: argparse.Namespace) -> int:
             merge_overlap=args.merge_overlap,
         )
         target = round_dir(run, args.round) / "normalization.md"
-        if target.exists() and args.overwrite:
+        if target.exists() and (args.overwrite or _is_init_stub_normalization(target)):
             target.unlink()
         atomic_write_new(target, body)
         print(f"wrote normalization skeleton: {target}")
