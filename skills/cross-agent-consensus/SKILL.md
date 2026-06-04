@@ -52,6 +52,19 @@ When `scripts/consensus` is present in the installed skill package, prefer it fo
 
 If the script is unavailable or fails for a host-specific reason, follow the existing template workflow manually and record the gap in the run folder.
 
+### Helper Required Flags Quick Reference
+
+Each helper has a required-flags minimum that `--help` documents; the most common ones for first-run orchestrators are listed here so they need not be discovered by trial:
+
+- `consensus init`: `--task` or `--task-file`, `--artifact-locator`, `--author`, `--orchestrator`, `--reviewer` (or supplied by config).
+- `consensus prompt`: `--run`, `--phase`. Phase-specific: `--actor` for reviewer/validator/author-response/rereview; `--review-batch` for rereview.
+- `consensus capture`: `--run`, `--phase`, `--source-file` or `--source-mode`. Reviewer phase also needs `--actor` and (when ambiguous) `--review-batch`, `--artifact-version`.
+- `consensus invocation-ready`: `--run`, `--actor`, `--prompt`, `--raw-output`, `--command -- <argv>`.
+- `consensus invoke-agent`: `--run`, `--actor`, `--player`, `--phase`, `--prompt`, `--raw-output`, `--command -- <argv>`.
+- `consensus agent-status` / `agent-peek` / `agent-watch` / `agent-cancel`: `--run`, `--actor`.
+- `consensus normalize`: `--run`, `--round`.
+- `consensus report` / `terminate`: `--run`, `--terminal-condition`.
+
 When a participant is named as a CLI/runtime reviewer or validator, such as Codex CLI, Claude CLI, Hermes, or another external agent process, the Orchestrator MUST start that participant with `scripts/consensus invoke-agent`. Do not satisfy a named external reviewer by using the host's internal subagent feature, an in-chat self-review, or an ordinary shell command followed by `capture`; those paths can preserve output, but they bypass supervised process telemetry and will not create `rounds/<round>/agents/<actor>/session-*` artifacts. Direct `capture` remains valid only for manual/imported evidence and must not be described as live invocation telemetry.
 
 For first-class runtime telemetry, use structured stream modes:
