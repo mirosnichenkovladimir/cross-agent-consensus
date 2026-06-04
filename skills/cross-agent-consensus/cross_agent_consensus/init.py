@@ -22,6 +22,10 @@ DOCUMENT_VALIDATORS = [
 ]
 CAC_VERSION = read_cac_version()
 
+# Stub content `init` writes to rounds/<round>/normalization.md. `normalize` recognises
+# this exact text and overwrites it on first call without requiring --overwrite.
+INIT_STUB_NORMALIZATION = "# Normalization\n\nNo normalization records have been recorded for this round.\n"
+
 
 def infer_validators(profile: str, validators: list[str]) -> list[str]:
     if validators:
@@ -285,7 +289,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         run / "validation.md": validation,
         run / "escalations.md": "# Escalations\n\nNo escalation records have been recorded.\n",
         run / "backlog.md": "# Backlog\n\nNon-blocking, deferred, and out-of-scope items belong here.\n",
-        first_round / "normalization.md": "# Normalization\n\nNo normalization records have been recorded for this round.\n",
+        first_round / "normalization.md": INIT_STUB_NORMALIZATION,
         first_round / "author-responses.md": "# Author Responses round-1\n\nNo author responses have been recorded for this round.\n",
         first_round / "validation.md": validation,
         first_round / "backlog.md": "# Round Backlog\n\nRound-local non-blocking, deferred, and out-of-scope items belong here.\n",

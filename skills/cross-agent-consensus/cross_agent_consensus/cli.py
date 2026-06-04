@@ -110,6 +110,7 @@ from cross_agent_consensus.invocation.readiness import (
     normalize_command_separator,
 )
 from cross_agent_consensus.invocation.peek import cmd_agent_peek
+from cross_agent_consensus.invocation.session_paths import FINAL_OUTPUT_MIRROR_SUFFIX
 from cross_agent_consensus.invocation.status import (
     agent_session_state_counts,
     cmd_agent_status,
@@ -1226,7 +1227,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Pre-declared path for raw stdout/event-stream capture. invoke-agent mirrors "
             "stdout here and writes the extracted parsed result to a "
-            "<raw-output>.final-output.md sibling. invocation-ready uses it for path planning only."
+            f"<raw-output>{FINAL_OUTPUT_MIRROR_SUFFIX} sibling. invocation-ready uses it for path planning only."
         ),
     )
     ready.add_argument("--approved", action="store_true")
@@ -1246,7 +1247,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Path that receives a copy of raw stdout (event stream for JSON-mode CLIs). "
             "On success, the extracted final-output is also mirrored to "
-            "<raw-output>.final-output.md beside this path."
+            f"<raw-output>{FINAL_OUTPUT_MIRROR_SUFFIX} beside this path."
         ),
     )
     invoke.add_argument("--cwd", default=".")

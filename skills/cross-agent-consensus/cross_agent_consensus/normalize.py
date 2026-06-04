@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from cross_agent_consensus.init import INIT_STUB_NORMALIZATION
 from cross_agent_consensus.io import atomic_write_new, eprint, utc_now
 from cross_agent_consensus.layout import normalize_round_id, round_dir
 from cross_agent_consensus.markdown_records import frontmatter
@@ -16,14 +17,10 @@ from cross_agent_consensus.records import canonical_finding_ids, parse_run_recor
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
-# Exact content `init` writes to rounds/<round>/normalization.md; safe to overwrite silently
-# on the first `normalize` call because it has no authored content to preserve.
-_INIT_STUB_NORMALIZATION = "# Normalization\n\nNo normalization records have been recorded for this round.\n"
-
 
 def _is_init_stub_normalization(path: Path) -> bool:
     try:
-        return path.read_text(encoding="utf-8") == _INIT_STUB_NORMALIZATION
+        return path.read_text(encoding="utf-8") == INIT_STUB_NORMALIZATION
     except OSError:
         return False
 

@@ -10,6 +10,16 @@ from cross_agent_consensus.layout import round_dir
 from cross_agent_consensus.models import AgentSessionPaths
 
 
+# Suffix appended to --raw-output to locate the mirrored parsed final-output
+# beside the raw stdout/event-stream capture.
+FINAL_OUTPUT_MIRROR_SUFFIX = ".final-output.md"
+
+
+def final_output_mirror_path(raw_output_path: Path) -> Path:
+    """Sibling path of --raw-output that holds the extracted final-output mirror."""
+    return raw_output_path.with_name(raw_output_path.name + FINAL_OUTPUT_MIRROR_SUFFIX)
+
+
 def path_for_json(path: Path, base: Path) -> str:
     try:
         return str(path.resolve().relative_to(base.resolve()))

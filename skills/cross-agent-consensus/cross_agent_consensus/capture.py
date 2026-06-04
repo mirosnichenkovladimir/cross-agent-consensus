@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,10 +18,9 @@ from cross_agent_consensus.layout import (
 from cross_agent_consensus.markdown_records import frontmatter, parse_records_from_file
 from cross_agent_consensus.models import FRESH_REVIEW_MODE, Record
 from cross_agent_consensus.prompts import review_batch_by_id
-from cross_agent_consensus.records import parse_run_records, records_by_type
+from cross_agent_consensus.records import NARRATIVE_FINDING_ID_RE, parse_run_records, records_by_type
 
 
-NARRATIVE_FINDING_ID_RE = re.compile(r"\bR(\d+)-([A-Z][A-Z0-9\-]*)-(\d{1,3})\b")
 _NARRATIVE_PARAGRAPH_LIMIT = 1200
 
 

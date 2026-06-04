@@ -11,6 +11,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 
 from cross_agent_consensus.invocation.session_paths import agent_session_paths
 from cross_agent_consensus.invocation.status import (
+    EMPTY_AGENT_STATUS_SUMMARY,
     agent_status_payload,
     agent_status_summary,
     missing_agent_status_payload,
@@ -40,10 +41,7 @@ class AgentStatusCancelTests(unittest.TestCase):
             self.assertEqual(payload["state_schema_version"], "cross-agent-consensus-state-1")
             self.assertEqual(payload["state"], "completed")
             self.assertEqual(payload["event_tail"], [{"type": "completed"}])
-            self.assertEqual(
-                payload["summary"],
-                {"final_output_lines": 0, "narrative_findings": 0, "event_errors": 0},
-            )
+            self.assertEqual(payload["summary"], EMPTY_AGENT_STATUS_SUMMARY)
 
     def test_missing_status_payload_matches_public_shape(self) -> None:
         payload = missing_agent_status_payload(Args(), "missing")
@@ -51,10 +49,7 @@ class AgentStatusCancelTests(unittest.TestCase):
         self.assertEqual(payload["state"], "missing")
         self.assertEqual(payload["round_id"], "round-001")
         self.assertEqual(payload["event_tail"], [])
-        self.assertEqual(
-            payload["summary"],
-            {"final_output_lines": 0, "narrative_findings": 0, "event_errors": 0},
-        )
+        self.assertEqual(payload["summary"], EMPTY_AGENT_STATUS_SUMMARY)
 
     def test_agent_status_summary_counts_lines_findings_and_event_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

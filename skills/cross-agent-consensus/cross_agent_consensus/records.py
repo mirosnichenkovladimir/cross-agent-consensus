@@ -10,6 +10,14 @@ from cross_agent_consensus.markdown_records import parse_records_from_file
 from cross_agent_consensus.models import Record
 
 
+NARRATIVE_FINDING_ID_RE = re.compile(r"\bR(\d+)-([A-Z][A-Z0-9\-]*)-(\d{1,3})\b")
+
+
+def unique_narrative_finding_ids(text: str) -> set[str]:
+    """Return the set of narrative finding IDs in `text`, lowercased."""
+    return {match.group(0).lower() for match in NARRATIVE_FINDING_ID_RE.finditer(text)}
+
+
 def is_protocol_payload_path(path: Path) -> bool:
     parts = path.parts
     if "payloads" in parts:
