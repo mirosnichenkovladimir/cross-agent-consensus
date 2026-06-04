@@ -6,11 +6,11 @@
   "managed_files": [
     {
       "path": "SKILL.md",
-      "sha256": "49023fbb089f5686d9d843d302e810fcb166301e1084aec4f13e228a006cfb55"
+      "sha256": "1d8837fae8bcb1f24dbf3bb9ffde9322649cd18fab5703545f44ee0ab3ede542"
     },
     {
       "path": "VERSION",
-      "sha256": "902311c7bb38fa1658ff403def6158ee7378fe9d6e2e284fa1c38735c31bd30b"
+      "sha256": "d0176718bd214ce8474c06ed61c395ca113fdfc2acdd86d9aa9933b40d9b561e"
     },
     {
       "path": "config/defaults.yaml",
@@ -155,7 +155,7 @@
     },
     {
       "path": "templates/prompts.md",
-      "sha256": "4f6748c3e5e9da92b52a718f69f8961b527495e49572745b2983a4591fc90907"
+      "sha256": "d29f181efeb3601e31d7453677111390dd30dad7e8fc44ed193e5f26c232b2b6"
     },
     {
       "path": "templates/rereview.md",

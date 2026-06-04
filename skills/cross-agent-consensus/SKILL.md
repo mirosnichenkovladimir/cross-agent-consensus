@@ -29,6 +29,51 @@ The installed package exposes a strict semantic version in `MAJOR.MINOR.PATCH` f
 
 The supported pinned invocation spelling is `cac@X.Y.Z: <task>` when a host can dispatch multiple installed versions. If host-level dispatch is unavailable, a pinned invocation must fail clearly when `X.Y.Z` differs from the installed version.
 
+## Quick Path (first 30 seconds)
+
+The current shipped lifecycle, end-to-end. Every command lists its required flags in [Helper Required Flags Quick Reference](#helper-required-flags-quick-reference); refer there when adapting this skeleton.
+
+```text
+RUN_ID=retry-backoff-design-consensus-001
+RUN=runs/$RUN_ID
+
+scripts/consensus init \
+  --task "design for retry-backoff" \
+  --artifact-locator artifacts/v1.md \
+  --author claude --orchestrator claude \
+  --reviewer codex --reviewer claude \
+  --run-id "$RUN_ID"
+
+# 1. Author phase — write/finalize artifacts/v1.md, then:
+scripts/consensus prompt --run "$RUN" --phase author --actor claude
+
+# 2. Reviewer phase (per actor)
+for ACTOR in codex claude; do
+  scripts/consensus prompt --run "$RUN" --phase reviewer --actor "$ACTOR"
+  scripts/consensus invocation-ready --run "$RUN" --actor "$ACTOR" \
+    --prompt "$RUN/rounds/round-001/prompts/reviewers/$ACTOR.md" \
+    --raw-output "$RUN/rounds/round-001/raw/reviewers/$ACTOR.out" \
+    --command -- <runtime argv for $ACTOR>
+  scripts/consensus invoke-agent --run "$RUN" --actor "$ACTOR" --player <player-id> \
+    --phase reviewer \
+    --prompt "$RUN/rounds/round-001/prompts/reviewers/$ACTOR.md" \
+    --raw-output "$RUN/rounds/round-001/raw/reviewers/$ACTOR.out" \
+    --approved --command -- <runtime argv for $ACTOR>
+  scripts/consensus capture --run "$RUN" --phase reviewer --actor "$ACTOR" \
+    --source-file "$RUN/rounds/round-001/raw/reviewers/$ACTOR.out"
+done
+
+# 3. Normalize, report, terminate
+scripts/consensus normalize --run "$RUN" --round round-001
+scripts/consensus report    --run "$RUN" --terminal-condition consensus_reached \
+  --final-artifact-version v1
+scripts/consensus terminate --run "$RUN" \
+  --terminal-condition consensus_reached \
+  --reason "consensus on v1; no blocking findings remain"
+```
+
+For long-running reviewers see [Long-Running Invocation: Peek-Loop Default](#long-running-invocation-peek-loop-default). For unattended runs see [M2 Boundary](#m2-boundary).
+
 ## Long-Running Invocation: Peek-Loop Default
 
 `scripts/consensus invoke-agent` blocks foreground while the named CLI runs. For reviewer/author/validator runs expected to take more than ~60s (every realistic Codex or Claude review), blocking foreground discards the entire M2 supervised-invocation value: the orchestrator becomes blind to live state, cannot surface progress to the operator, and cannot `agent-cancel` if something goes wrong.

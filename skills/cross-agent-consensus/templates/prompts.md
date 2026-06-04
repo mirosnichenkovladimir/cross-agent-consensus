@@ -1,8 +1,10 @@
 # Cross-Agent Consensus Prompts
 
-Use these prompts manually. Do not automatically invoke external runtimes from the M2 skill.
+These are reference prompt bodies for each lifecycle phase. They describe *what* the Author, Reviewer, Author-Response, Re-Review, and Final-Report prompts must contain — not *how* they get delivered to an agent.
 
-Before any host, human operator, or external CLI uses one of these prompts, copy the exact prompt text into `runs/<run_id>/rounds/round-NNN/prompts/` and reference that path from the related lifecycle record or notes. If a host first captures output in chat history, terminal scrollback, or `/tmp`, copy the raw output into `runs/<run_id>/rounds/round-NNN/raw/` or the appropriate raw-output record before normalization.
+Delivery rules (manual vs. supervised-CLI invocation, operator approval, `Policy.unattended_invocation` scope, telemetry preservation under `rounds/<round>/agents/<actor>/session-*/`) are defined by `SKILL.md` §M2 Boundary and `references/invocation.md`. Always treat those documents as authoritative when delivery rules and these prompt bodies appear to disagree.
+
+Before any prompt is delivered, copy the exact prompt text into `runs/<run_id>/rounds/round-NNN/prompts/` and reference it from the related record. If raw output is first captured in chat history, terminal scrollback, or `/tmp`, copy it into `runs/<run_id>/rounds/round-NNN/raw/` (or the appropriate raw-output record) before normalization.
 
 ## Author Prompt
 
