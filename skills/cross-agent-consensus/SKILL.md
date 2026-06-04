@@ -29,6 +29,15 @@ The installed package exposes a strict semantic version in `MAJOR.MINOR.PATCH` f
 
 The supported pinned invocation spelling is `cac@X.Y.Z: <task>` when a host can dispatch multiple installed versions. If host-level dispatch is unavailable, a pinned invocation must fail clearly when `X.Y.Z` differs from the installed version.
 
+## Operator Approval Handshake
+
+`scripts/consensus invoke-agent` is fail-closed without `--approved`; the Orchestrator decides whether to pass it. The skill rule is:
+
+- If the user trigger explicitly names the participant CLI (e.g. `cac: do review with codex`, `cac: review this with claude`), the Orchestrator MAY pass `--approved` directly because the operator has already authorized the exact CLI for this run.
+- If the trigger is indirect (e.g. `cac: review this`, `cac: validate it`) and the configured reviewer resolves to a CLI without explicit operator naming, the Orchestrator MUST print the exact `invoke-agent` command, including the resolved argv, and ask the operator to confirm before passing `--approved`. Policy may pre-approve via `unattended_invocation: true` with scope limits in run-scoped (not persistent) config; in that case the handshake is replaced by the recorded policy decision.
+
+The approval gate lives in code (`--approved` is mandatory before any named CLI launch); the handshake lives here so the operator always knows what is about to run.
+
 ## M2 Boundary
 
 This package is a design/manual-protocol implementation only. Do not create an automatic cross-runtime runner that executes without explicit participant selection, authorization, prompt capture, and raw-output capture. Do not invent model/provider selection, create JSON schemas, or apply reviewer suggestions directly to an artifact. When the user or Policy explicitly names a runtime/CLI as a participant, the Orchestrator MUST invoke that CLI/tool directly only after the run folder and exact prompt are recorded and either the operator has approved the command for this run or Policy declares `unattended_invocation: true` with scope limits. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not reasons to skip evidence. If these conditions are not met, write the exact manual command or prompt into the run folder and ask the operator to run it.
