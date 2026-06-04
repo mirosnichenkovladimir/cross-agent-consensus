@@ -119,6 +119,8 @@ Installed defaults live at `config/defaults.yaml` and are managed package files.
 
 Reviewer identities are participants, not review lenses. If saved configuration supplies `participants.reviewers`, `consensus init --reviewer ...` MUST fail unless `--allow-reviewer-config-override` is present. Use `--review-focus` to record emphasis areas such as publication safety, API surface, or dispatcher policy without replacing configured reviewers.
 
+When the user trigger names exactly one reviewer that is a subset of the configured reviewers (e.g. `cac: do review with codex` against a config with `reviewers: [codex, claude]`), the Orchestrator MUST treat that as an explicit override and pass `--allow-reviewer-config-override` together with the single `--reviewer` flag. Do not re-add the unmentioned reviewers to satisfy the configured list, because that silently runs a reviewer the operator did not ask for.
+
 Use these commands for configuration:
 
 - `scripts/consensus config show [--json]`;
