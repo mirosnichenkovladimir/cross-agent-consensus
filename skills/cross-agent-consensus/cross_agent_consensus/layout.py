@@ -20,23 +20,33 @@ def detect_run_layout(run: Path) -> str:
     return "ledger"
 
 
-def normalize_round_id(value: str | None) -> str:
+def _parse_round_number(value: str | None) -> int:
     if not value:
-        return "round-1"
-    if value.startswith("round-"):
-        return value
-    return f"round-{value}"
-
-
-def round_number(value: str | None) -> int:
-    round_id = normalize_round_id(value)
-    match = re.fullmatch(r"round-(\d+)", round_id)
+        return 1
+    raw = value if value.startswith("round-") else f"round-{value}"
+    match = re.fullmatch(r"round-(\d+)", raw)
     if not match:
         raise ValueError(f"round must be a positive integer or round-<n>: {value}")
     number = int(match.group(1))
     if number < 1:
         raise ValueError(f"round must be positive: {value}")
     return number
+
+
+def normalize_round_id(value: str | None) -> str:
+    """Canonicalize a round id to the short ``round-N`` form.
+
+    Accepts ``None`` (defaults to round 1), a bare integer string (``"1"``),
+    a short id (``"round-1"``), or a zero-padded long form (``"round-001"``)
+    and resolves all of them to the same canonical ``"round-N"`` short id.
+    The on-disk directory format remains zero-padded (``round-001``) via
+    :func:`round_dir`; record `round_id` fields use the short form.
+    """
+    return f"round-{_parse_round_number(value)}"
+
+
+def round_number(value: str | None) -> int:
+    return _parse_round_number(value)
 
 
 def round_dir(run: Path, value: str | None = None) -> Path:

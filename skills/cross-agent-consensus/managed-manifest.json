@@ -10,7 +10,7 @@
     },
     {
       "path": "VERSION",
-      "sha256": "ceb9b2c03afb769df3b1e518520c4e1798e9a3313a1c5ffffcb054fef5d6d6fb"
+      "sha256": "780363b8ef02ff7e83eb72709f6396b09dec21a26403bb44f58ea8d6757fe33d"
     },
     {
       "path": "config/defaults.yaml",
@@ -23,7 +23,7 @@
     },
     {
       "path": "cross_agent_consensus/capture.py",
-      "sha256": "3e8e3848aa5a534ab9e9e25511cafde380297b6b69b9c73bffb73997160d6d82"
+      "sha256": "73a6c5f8a43fa656a1eb1dca214591e392c00643769ad4cd019528a0437ceb3b"
     },
     {
       "path": "cross_agent_consensus/config.py",
@@ -72,8 +72,8 @@
     },
     {
       "path": "cross_agent_consensus/cli.py",
-      "sha256": "852220dae179b56669310976f865beb8fd69a921925c580df970dc5a1c06e4cf",
-      "bytes": 58845
+      "sha256": "ae14e420b91bf8444376e0938d55c98f34b9a0a674116dcf8b6a8a60cf5a98dd",
+      "bytes": 59642
     },
     {
       "path": "cross_agent_consensus/normalize.py",
@@ -95,7 +95,7 @@
     },
     {
       "path": "cross_agent_consensus/layout.py",
-      "sha256": "30423f36e41fcb0a18533694333b181bea53114d71200a873d4ae7c693c862c6"
+      "sha256": "22476c50639c79e4092b87a78c40bb857c56a80e2a8952f05eb9c377e73e0dda"
     },
     {
       "path": "cross_agent_consensus/markdown_records.py",

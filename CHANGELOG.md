@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.8.3] - 2026-06-04
+
+### Changed
+- `normalize_round_id` canonicalizes all input forms (`"1"`, `"round-1"`,
+  `"round-001"`) to the short `round-N` id used in records. The on-disk
+  directory format remains zero-padded (`round-001`) via `round_dir`.
+- `--round` help text on `invoke-agent`, `agent-status`, `agent-watch`,
+  `agent-peek`, `agent-cancel`, `run`, and `normalize` documents the
+  accepted forms explicitly.
+- `capture.py` uses `normalize_round_id` instead of an ad-hoc `round-` prefix
+  check; the prior code accepted `"round-1"` and `"1"` but not `"round-001"`.
+
+### References
+- Closes friction-log item #11 / CF-006 (CLI `--round round-1` default vs
+  on-disk `round-001` layout).
+
 ## [0.8.2] - 2026-06-04
 
 ### Fixed
@@ -171,6 +187,7 @@ Bundles the followup-feedback.md fixes from the 0.7.0 friction log.
 ### Added
 - Initial published baseline: CAC review orchestration and reports.
 
+[0.8.3]: https://gitlab.corp.cloudlinux.com/kc-python-automation/cross-model-consensus/-/compare/v0.8.2...v0.8.3
 [0.8.2]: https://gitlab.corp.cloudlinux.com/kc-python-automation/cross-model-consensus/-/compare/v0.8.1...v0.8.2
 [0.8.1]: https://gitlab.corp.cloudlinux.com/kc-python-automation/cross-model-consensus/-/compare/v0.8.0...v0.8.1
 [0.8.0]: https://gitlab.corp.cloudlinux.com/kc-python-automation/cross-model-consensus/-/compare/v0.7.3...v0.8.0

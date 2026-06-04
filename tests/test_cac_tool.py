@@ -766,7 +766,7 @@ class ConsensusToolTests(unittest.TestCase):
                 "round-004",
             )
             self.assertEqual(result.returncode, 1)
-            self.assertIn("no ReviewBatch found for round-004", result.stderr)
+            self.assertIn("no ReviewBatch found for round-4", result.stderr)
 
     def test_capture_round_derives_from_review_batch_and_rejects_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

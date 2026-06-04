@@ -11,6 +11,7 @@ from cross_agent_consensus.io import append_text, atomic_write_new, sha256_file,
 from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
     detect_run_layout,
+    normalize_round_id,
     record_round_number,
     round_dir,
     round_id_from_number,
@@ -134,10 +135,7 @@ def phase_record_target(run: Path, args: Any, records: list[Record] | None = Non
             return run / "artifacts" / f"{args.artifact_version}.md" if args.artifact_version else None
         return None
     if args.phase == "reviewer":
-        round_number = args.round or "round-1"
-        if not round_number.startswith("round-"):
-            round_number = f"round-{round_number}"
-        return run / "reviews" / f"{round_number}-{actor}.md"
+        return run / "reviews" / f"{normalize_round_id(args.round)}-{actor}.md"
     if args.phase == "validator":
         return run / "validation.md"
     if args.phase == "author":
@@ -202,9 +200,7 @@ def append_reviewer_capture(
         raise ValueError(f"review_batch_id not found: {args.review_batch}")
     reviewer_identity = args.actor or "reviewer"
     actor = slugify(reviewer_identity)
-    round_id = args.round or "round-1"
-    if not round_id.startswith("round-"):
-        round_id = f"round-{round_id}"
+    round_id = normalize_round_id(args.round)
     created_at = utc_now()
     raw_id = f"raw-output-{round_id}-{actor}"
     if qualified_reviewer_payload_needed(run, records, args):

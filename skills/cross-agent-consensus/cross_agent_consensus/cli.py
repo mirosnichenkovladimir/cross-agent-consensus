@@ -1241,7 +1241,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Execute one same-round phase end-to-end (prompt -> ready -> invoke -> capture).",
     )
     add_common_run_arg(run)
-    run.add_argument("--round", required=True)
+    run.add_argument(
+        "--round",
+        required=True,
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+    )
     run.add_argument("--phase", choices=["author", "reviewer", "rereview", "validator"], required=True)
     run.add_argument("--actors", help="Comma-separated subset; default = all actors named for this phase in this round.")
     run.add_argument(
@@ -1268,7 +1272,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     invoke = sub.add_parser("invoke-agent", help="Start one explicit agent player invocation and record telemetry.")
     add_common_run_arg(invoke)
-    invoke.add_argument("--round", default="round-1")
+    invoke.add_argument(
+        "--round",
+        default="round-1",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+    )
     invoke.add_argument("--phase", required=True, choices=["author", "reviewer", "validator", "manual"])
     invoke.add_argument("--actor", required=True)
     invoke.add_argument("--player", required=True)
@@ -1293,7 +1301,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_status = sub.add_parser("agent-status", help="Read the latest agent session state and event tail.")
     add_common_run_arg(agent_status)
     agent_status.add_argument("--actor", required=True)
-    agent_status.add_argument("--round", default="round-1")
+    agent_status.add_argument(
+        "--round",
+        default="round-1",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001').",
+    )
     agent_status.add_argument("--session")
     agent_status.add_argument("--json", action="store_true")
     agent_status.add_argument("--tail", type=int, default=20)
@@ -1302,7 +1314,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_watch = sub.add_parser("agent-watch", help="Print normalized agent events for a session.")
     add_common_run_arg(agent_watch)
     agent_watch.add_argument("--actor", required=True)
-    agent_watch.add_argument("--round", default="round-1")
+    agent_watch.add_argument(
+        "--round",
+        default="round-1",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001').",
+    )
     agent_watch.add_argument("--session")
     agent_watch.add_argument("--follow", action="store_true")
     agent_watch.add_argument("--interval-seconds", type=float, default=1.0)
@@ -1311,7 +1327,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_peek = sub.add_parser("agent-peek", help="Print a read-only operator peek for one agent session.")
     add_common_run_arg(agent_peek)
     agent_peek.add_argument("--actor", required=True, help="Reviewer identity whose session is being peeked.")
-    agent_peek.add_argument("--round", default="round-1", help="Round identifier (e.g. '1' or 'round-001').")
+    agent_peek.add_argument(
+        "--round",
+        default="round-1",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+    )
     agent_peek.add_argument("--session", help="Specific session directory name; defaults to the latest session.")
     agent_peek.add_argument("--tail", type=int, help="Max event lines to scan from each telemetry file (1-1000).")
     agent_peek.add_argument("--snippet-chars", type=int, help="Cap on snippet text length before truncation (40-500).")
@@ -1326,7 +1346,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_cancel = sub.add_parser("agent-cancel", help="Request cancellation for a live agent session.")
     add_common_run_arg(agent_cancel)
     agent_cancel.add_argument("--actor", required=True)
-    agent_cancel.add_argument("--round", default="round-1")
+    agent_cancel.add_argument(
+        "--round",
+        default="round-1",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001').",
+    )
     agent_cancel.add_argument("--session")
     agent_cancel.add_argument("--reason", default="operator requested cancellation")
     agent_cancel.add_argument("--grace-seconds", type=float, default=DEFAULT_CANCEL_GRACE_SECONDS)
@@ -1345,7 +1369,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skeleton NormalizationRecord/CanonicalFinding from captured RawFindings.",
     )
     add_common_run_arg(normalize)
-    normalize.add_argument("--round", required=True)
+    normalize.add_argument(
+        "--round",
+        required=True,
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+    )
     normalize.add_argument("--actor", default="orchestrator-consensus-tool")
     normalize.add_argument("--merge-overlap", action="store_true")
     normalize.add_argument("--overwrite", action="store_true")

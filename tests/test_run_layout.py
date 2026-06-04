@@ -24,11 +24,17 @@ class RunLayoutTests(unittest.TestCase):
     def test_round_aliases_are_normalized_to_numeric_paths(self) -> None:
         run = Path("runs/example")
 
+        # All input forms canonicalize to the short `round-N` id. The on-disk
+        # directory format remains zero-padded via round_dir.
         self.assertEqual(normalize_round_id(None), "round-1")
         self.assertEqual(normalize_round_id("2"), "round-2")
-        self.assertEqual(normalize_round_id("round-002"), "round-002")
+        self.assertEqual(normalize_round_id("round-2"), "round-2")
+        self.assertEqual(normalize_round_id("round-002"), "round-2")
         self.assertEqual(round_number("round-002"), 2)
+        self.assertEqual(round_number("round-2"), 2)
+        self.assertEqual(round_number("2"), 2)
         self.assertEqual(round_dir(run, "2"), run / "rounds" / "round-002")
+        self.assertEqual(round_dir(run, "round-002"), run / "rounds" / "round-002")
 
     def test_required_paths_support_round_first_and_legacy_layouts(self) -> None:
         run = Path("runs/example")
