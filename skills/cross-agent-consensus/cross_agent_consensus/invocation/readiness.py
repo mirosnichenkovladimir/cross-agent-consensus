@@ -33,6 +33,73 @@ def policy_allows_unattended(records: list[Record]) -> bool:
     return unattended is True
 
 
+def policy_allows_unattended_scoped(
+    records: list[Record],
+    *,
+    run_id: str,
+    round_id: str,
+    phase: str,
+    actor: str,
+) -> bool:
+    """Scope-aware variant of :func:`policy_allows_unattended` for the run macro.
+
+    The legacy helper only checks ``enabled``; this one enforces the scope
+    contract documented in ``SKILL.md`` §Operator Approval Handshake:
+
+    - missing Policy or ``unattended_invocation`` -> ``False``
+    - bare ``unattended_invocation: true`` -> ``True`` (no scope limit;
+      acceptable only in task-file / CLI per SKILL.md §Configuration)
+    - dict form requires ``enabled: true`` AND a non-empty ``scope``
+    - scope can be a list of ``key:value`` tokens or a dict; absence of a
+      key means "any". Match is exact-string (case-sensitive).
+    """
+    policy = first_record(records, "Policy")
+    if not policy:
+        return False
+    unattended = policy.data.get("unattended_invocation")
+    if unattended is True:
+        return True
+    if not isinstance(unattended, dict):
+        return False
+    if unattended.get("enabled") is not True:
+        return False
+    scope = unattended.get("scope")
+    if not scope:
+        return False
+    return _scope_matches(scope, run_id=run_id, round_id=round_id, phase=phase, actor=actor)
+
+
+def _scope_matches(scope: object, *, run_id: str, round_id: str, phase: str, actor: str) -> bool:
+    context = {"run": run_id, "round": round_id, "phase": phase, "actor": actor}
+    if isinstance(scope, list):
+        # Token form: ["phase:reviewer", "actor:codex", "actor:claude"]. Keys with no
+        # listed value match "any"; if any token is present for a key, the call must
+        # match one of them.
+        by_key: dict[str, list[str]] = {}
+        for token in scope:
+            if not isinstance(token, str) or ":" not in token:
+                return False  # malformed -> fail closed
+            key, _, value = token.partition(":")
+            by_key.setdefault(key.strip(), []).append(value.strip())
+        for key, allowed in by_key.items():
+            if key not in context:
+                return False  # unknown key -> fail closed
+            if context[key] not in allowed:
+                return False
+        return True
+    if isinstance(scope, dict):
+        # Dict form: {phase: [...], actors: [...], rounds: [...], runs: [...]}
+        plural_to_key = {"phases": "phase", "actors": "actor", "rounds": "round", "runs": "run"}
+        for raw_key, allowed in scope.items():
+            key = plural_to_key.get(raw_key, raw_key)
+            if key not in context:
+                return False
+            if not isinstance(allowed, list) or context[key] not in allowed:
+                return False
+        return True
+    return False
+
+
 def path_under_any(path: Path, roots: list[Path]) -> bool:
     resolved = path.resolve()
     for root in roots:

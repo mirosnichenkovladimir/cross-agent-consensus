@@ -1,0 +1,653 @@
+"""`consensus run` macro: prompt finalization + readiness + invoke-agent + capture.
+
+Single-command driver for one same-round phase (`reviewer` is the primary path).
+The macro composes existing entry points (`cmd_prompt`, `cmd_invoke_agent`,
+`cmd_capture`) and adds a single new audit record (``OperatorApproval``) — no
+protocol-runtime changes. See
+``plans_and_designs/cac-design-notes/feedback-notes-04-06/prioritization-opinion/tier-2-needs-design/DESIGN.md``
+for the contract and truth table.
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import shlex
+from dataclasses import dataclass
+from pathlib import Path
+
+from cross_agent_consensus.invocation.adapters import PLAYER_ALIASES
+from cross_agent_consensus.invocation.process_monitor import (
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_STALE_TIMEOUT_SECONDS,
+)
+from cross_agent_consensus.invocation.readiness import (
+    invocation_ready_errors,
+    policy_allows_unattended_scoped,
+)
+from cross_agent_consensus.io import append_text, atomic_write_new, eprint, slugify, utc_now
+from cross_agent_consensus.layout import detect_run_layout, normalize_round_id, round_dir, DEFAULT_LAYOUT
+from cross_agent_consensus.markdown_records import frontmatter
+from cross_agent_consensus.models import Record
+from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
+
+
+PHASE_TO_PROMPT_SUBDIR = {
+    "reviewer": "reviewers",
+    "rereview": "reviewers",
+    "validator": "validators",
+    "author": "",  # author prompt is at rounds/<round>/prompts/author.md
+}
+
+PHASE_TO_RAW_SUBDIR = {
+    "reviewer": "reviewers",
+    "rereview": "reviewers",
+    "validator": "validators",
+    "author": "",
+}
+
+
+@dataclass(frozen=True)
+class ActorPlan:
+    """One actor's resolved plan for a single phase of a single round.
+
+    Built once per actor before any launch. Drives both execution
+    (``_launch_all``) and manual fallback printing (``_emit_manual_fallback``)
+    so the printed commands are byte-for-byte the argv the macro would call.
+    """
+
+    actor: str
+    player: str
+    phase: str
+    round_id: str
+    prompt_path: Path
+    raw_output_path: Path
+    cwd: str
+    runtime_command: list[str]
+    idle_timeout_seconds: float
+    stale_timeout_seconds: float
+    heartbeat_interval_seconds: float
+    review_batch_id: str | None
+    artifact_version_id: str | None
+
+
+# ---------------------------------------------------------------------------
+# Actor resolution (R5)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_actors(
+    records: list[Record],
+    *,
+    round_id: str,
+    phase: str,
+    requested: list[str] | None,
+) -> list[str]:
+    if requested:
+        return list(requested)
+    participants = first_record(records, "Participants")
+    if phase == "author":
+        return [str(participants.data["author_identity"])] if participants else []
+    if phase == "validator":
+        policy = first_record(records, "Policy")
+        return [str(value) for value in policy.data.get("required_validator_ids") or []] if policy else []
+    if phase in ("reviewer", "rereview"):
+        batches = [r for r in records_by_type(records, "ReviewBatch") if str(r.data.get("round_id")) == round_id]
+        active = batches[-1] if batches else None
+        if active is not None:
+            expected = active.data.get("expected_reviewer_identities") or []
+            if expected:
+                return [str(value) for value in expected]
+        return [str(value) for value in (participants.data.get("reviewer_identities") or [])] if participants else []
+    raise ValueError(f"unsupported phase: {phase}")
+
+
+# ---------------------------------------------------------------------------
+# Plan construction
+# ---------------------------------------------------------------------------
+
+
+def _player_for_actor(actor: str) -> str:
+    """Map an actor identity to a player id; falls back to generic-cli."""
+
+    canonical = PLAYER_ALIASES.get(actor)
+    if canonical:
+        return canonical
+    if actor in ("manual",):
+        return "manual"
+    return "generic-cli"
+
+
+def _runtime_command_for_actor(records: list[Record], actor: str) -> list[str]:
+    """Extract ``reviewer_clis.<actor>.command`` from the ConfigResolution record.
+
+    ConfigResolution.effective_values is a dict keyed by ``<group>.<key>`` with
+    ``{"value": ..., "source_layer": ...}`` shape (see config.consumed_config_values).
+    Returns an empty list when no entry is recorded — callers treat that as
+    a blocker.
+    """
+
+    resolution = first_record(records, "ConfigResolution")
+    if resolution is None:
+        return []
+    effective = resolution.data.get("effective_values") or {}
+    if not isinstance(effective, dict):
+        return []
+    key = f"reviewer_clis.{actor}.command"
+    entry = effective.get(key)
+    if isinstance(entry, dict):
+        value = entry.get("value")
+    else:
+        value = entry
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
+def _prompt_path(run: Path, round_id: str, phase: str, actor: str) -> Path:
+    base = round_dir(run, round_id) / "prompts"
+    subdir = PHASE_TO_PROMPT_SUBDIR.get(phase, "")
+    if phase == "author":
+        return base / "author.md"
+    if phase == "validator":
+        return base / "validators" / f"{slugify(actor)}.md"
+    return base / subdir / f"{slugify(actor)}.md"
+
+
+def _raw_output_path(run: Path, round_id: str, phase: str, actor: str) -> Path:
+    base = round_dir(run, round_id) / "raw"
+    if phase == "author":
+        return base / "author.out"
+    subdir = PHASE_TO_RAW_SUBDIR.get(phase, "")
+    return base / subdir / f"{slugify(actor)}.out"
+
+
+def _single_or_none(records: list[Record], record_type: str, id_field: str) -> str | None:
+    matches = records_by_type(records, record_type)
+    if len(matches) == 1:
+        value = matches[0].data.get(id_field)
+        return str(value) if value else None
+    return None
+
+
+def _active_review_batch_id(records: list[Record], round_id: str) -> str | None:
+    batches = [r for r in records_by_type(records, "ReviewBatch") if str(r.data.get("round_id")) == round_id]
+    if not batches:
+        return None
+    value = batches[-1].data.get("review_batch_id")
+    return str(value) if value else None
+
+
+def _build_plan(
+    records: list[Record],
+    run: Path,
+    *,
+    round_id: str,
+    phase: str,
+    actor: str,
+    cwd: str,
+    idle_timeout_seconds: float,
+    stale_timeout_seconds: float,
+    heartbeat_interval_seconds: float,
+) -> ActorPlan:
+    return ActorPlan(
+        actor=actor,
+        player=_player_for_actor(actor),
+        phase=phase,
+        round_id=round_id,
+        prompt_path=_prompt_path(run, round_id, phase, actor),
+        raw_output_path=_raw_output_path(run, round_id, phase, actor),
+        cwd=cwd,
+        runtime_command=_runtime_command_for_actor(records, actor),
+        idle_timeout_seconds=idle_timeout_seconds,
+        stale_timeout_seconds=stale_timeout_seconds,
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
+        review_batch_id=_active_review_batch_id(records, round_id),
+        artifact_version_id=_single_or_none(records, "ArtifactVersion", "artifact_version_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prompt finalization
+# ---------------------------------------------------------------------------
+
+
+def _finalize_prompts(run: Path, *, plans: list[ActorPlan]) -> list[str]:
+    """Ensure every actor's prompt file exists and is not a draft.
+
+    Returns a list of human-readable error messages for the rare unfixable case
+    (e.g. ``cmd_prompt`` itself fails). Missing prompts are written via
+    ``cmd_prompt``; existing finalized prompts are left untouched.
+    """
+
+    from cross_agent_consensus.cli import cmd_prompt as _cmd_prompt  # late: avoid cli<->run_macro cycle
+
+    errors: list[str] = []
+    for plan in plans:
+        if plan.prompt_path.is_file() and "draft" not in plan.prompt_path.name:
+            continue
+        prompt_args = argparse.Namespace(
+            run=str(run),
+            phase=plan.phase,
+            actor=plan.actor,
+            round=plan.round_id,
+            review_batch=None,
+            artifact_version=plan.artifact_version_id,
+            force_draft=False,
+            dry_run=False,
+        )
+        rc = _cmd_prompt(prompt_args)
+        if rc != 0:
+            errors.append(f"prompt finalization failed for actor {plan.actor}: cmd_prompt returned {rc}")
+            continue
+        if not plan.prompt_path.is_file():
+            errors.append(f"prompt finalization wrote no file at expected path: {plan.prompt_path}")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Readiness
+# ---------------------------------------------------------------------------
+
+
+def _run_readiness(run: Path, *, plans: list[ActorPlan]) -> dict[str, list[str]]:
+    """Run ``invocation_ready_errors`` per actor; return per-actor error lists.
+
+    Empty list per actor means ready. Macro aborts before any launch if any
+    actor has a non-empty list (all-or-nothing round isolation).
+    """
+
+    per_actor: dict[str, list[str]] = {}
+    for plan in plans:
+        readiness_args = argparse.Namespace(
+            run=str(run),
+            actor=plan.actor,
+            player=plan.player,
+            prompt=str(plan.prompt_path),
+            raw_output=str(plan.raw_output_path),
+            approved=True,  # macro passes its own --approved through to readiness
+            command=plan.runtime_command,
+        )
+        errors = invocation_ready_errors(run, readiness_args, plan.runtime_command)
+        if not plan.runtime_command:
+            errors.append(
+                f"no runtime command configured for actor {plan.actor!r}; "
+                f"set reviewer_clis.{plan.actor}.command in config or pass it via task-file"
+            )
+        per_actor[plan.actor] = errors
+    return per_actor
+
+
+# ---------------------------------------------------------------------------
+# Launch + capture
+# ---------------------------------------------------------------------------
+
+
+def _launch_all(
+    run: Path,
+    *,
+    plans: list[ActorPlan],
+    sequential: bool,
+) -> dict[str, int]:
+    """Invoke ``cmd_invoke_agent`` for every plan; collect per-actor exit codes.
+
+    Failed actors do **not** cancel siblings (round-level isolation contract).
+    """
+
+    from cross_agent_consensus.invocation.process_monitor import cmd_invoke_agent as _cmd_invoke_agent  # late: cycle
+
+    def _one(plan: ActorPlan) -> tuple[str, int]:
+        invoke_args = argparse.Namespace(
+            run=str(run),
+            round=plan.round_id,
+            phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
+            actor=plan.actor,
+            player=plan.player,
+            prompt=str(plan.prompt_path),
+            raw_output=str(plan.raw_output_path),
+            cwd=plan.cwd,
+            approved=True,
+            idle_timeout_seconds=plan.idle_timeout_seconds,
+            stale_timeout_seconds=plan.stale_timeout_seconds,
+            heartbeat_interval_seconds=plan.heartbeat_interval_seconds,
+            command=list(plan.runtime_command),
+        )
+        try:
+            rc = _cmd_invoke_agent(invoke_args)
+        except Exception as exc:  # defensive — invoke-agent should not throw, but isolate
+            eprint(f"error: invoke-agent raised for actor {plan.actor}: {exc}")
+            rc = 1
+        return plan.actor, rc
+
+    exit_codes: dict[str, int] = {}
+    if sequential or len(plans) <= 1:
+        for plan in plans:
+            actor, rc = _one(plan)
+            exit_codes[actor] = rc
+        return exit_codes
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(plans))) as pool:
+        futures = [pool.submit(_one, plan) for plan in plans]
+        for future in concurrent.futures.as_completed(futures):
+            actor, rc = future.result()
+            exit_codes[actor] = rc
+    return exit_codes
+
+
+def _capture_all(
+    run: Path,
+    *,
+    plans: list[ActorPlan],
+    exit_codes: dict[str, int],
+) -> dict[str, int]:
+    """Call ``cmd_capture`` for every plan; ``--no-append-record`` for failures.
+
+    Returns per-actor capture exit codes (separate from invoke-agent rc).
+    """
+
+    from cross_agent_consensus.cli import cmd_capture as _cmd_capture  # late: avoid cli<->run_macro cycle
+
+    capture_rcs: dict[str, int] = {}
+    for plan in plans:
+        if plan.phase not in ("reviewer", "validator", "author", "manual"):
+            # rereview is not a capture phase; rereview decisions are recorded
+            # via cmd_rereview_skeleton separately. Skip silently.
+            capture_rcs[plan.actor] = 0
+            continue
+        if not plan.raw_output_path.is_file():
+            # process never produced stdout — nothing to capture; surface in summary
+            capture_rcs[plan.actor] = 0
+            continue
+        rc = exit_codes.get(plan.actor, 0)
+        capture_args = argparse.Namespace(
+            run=str(run),
+            phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
+            actor=plan.actor,
+            review_batch=plan.review_batch_id,
+            artifact_version=plan.artifact_version_id,
+            source_file=str(plan.raw_output_path),
+            source_mode="file",
+            source_command=None,
+            provider=plan.player,
+            round=plan.round_id,
+            validator_id=None,
+            result=None,
+            waiver_authority=None,
+            waiver_rationale=None,
+            no_append_record=(rc != 0),
+            no_narrative_extract=False,
+        )
+        try:
+            capture_rcs[plan.actor] = _cmd_capture(capture_args)
+        except Exception as exc:
+            eprint(f"error: capture raised for actor {plan.actor}: {exc}")
+            capture_rcs[plan.actor] = 1
+    return capture_rcs
+
+
+# ---------------------------------------------------------------------------
+# OperatorApproval stamp
+# ---------------------------------------------------------------------------
+
+
+def _operator_approval_text(
+    *,
+    record_id: str,
+    run_id: str,
+    round_id: str,
+    phase: str,
+    actors: list[str],
+    mechanism: str,
+    operator_identity: str | None,
+    created_at: str,
+) -> str:
+    data = {
+        "record_type": "OperatorApproval",
+        "schema_version": "m2-markdown-1",
+        "run_id": run_id,
+        "actor_identity": "orchestrator-run-macro",
+        "created_at": created_at,
+        "operator_approval_id": record_id,
+        "approved_actors": list(actors),
+        "scope_run_id": run_id,
+        "scope_round_id": round_id,
+        "scope_phase": phase,
+        "mechanism": mechanism,
+        "operator_identity_or_null": operator_identity,
+    }
+    return "\n".join(
+        [
+            "",
+            f"## OperatorApproval {record_id}",
+            frontmatter(data),
+            "",
+        ]
+    )
+
+
+def _stamp_operator_approval(
+    run: Path,
+    *,
+    run_id: str,
+    round_id: str,
+    phase: str,
+    actors: list[str],
+    mechanism: str,
+    operator_identity: str | None,
+) -> Path:
+    created_at = utc_now()
+    record_id = f"operator-approval-{slugify(round_id)}-{slugify(phase)}-{created_at.replace(':', '').replace('-', '')}"
+    if detect_run_layout(run) == DEFAULT_LAYOUT:
+        target = round_dir(run, round_id) / "operator-approval.md"
+    else:
+        target = run / "operator-approval.md"
+    text = _operator_approval_text(
+        record_id=record_id,
+        run_id=run_id,
+        round_id=round_id,
+        phase=phase,
+        actors=actors,
+        mechanism=mechanism,
+        operator_identity=operator_identity,
+        created_at=created_at,
+    )
+    if target.exists():
+        append_text(target, text)
+    else:
+        atomic_write_new(target, text.lstrip("\n"))
+    return target
+
+
+# ---------------------------------------------------------------------------
+# Manual fallback printer
+# ---------------------------------------------------------------------------
+
+
+def _fallback_lines_for_plan(plan: ActorPlan) -> list[str]:
+    """One copy-pasteable ``consensus invoke-agent`` line per actor (R4).
+
+    The argv is the literal argv the macro would have passed to
+    ``cmd_invoke_agent``. Round-trips through ``argparse`` cleanly — verified
+    by parser-smoke test.
+    """
+
+    parts = [
+        "scripts/consensus invoke-agent",
+        f"--round {shlex.quote(plan.round_id)}",
+        f"--phase {plan.phase if plan.phase in ('author', 'reviewer', 'validator', 'manual') else 'reviewer'}",
+        f"--actor {shlex.quote(plan.actor)}",
+        f"--player {shlex.quote(plan.player)}",
+        f"--prompt {shlex.quote(str(plan.prompt_path))}",
+        f"--raw-output {shlex.quote(str(plan.raw_output_path))}",
+        f"--cwd {shlex.quote(plan.cwd)}",
+        "--approved",
+    ]
+    if plan.runtime_command:
+        parts.append("--command -- " + shlex.join(plan.runtime_command))
+    else:
+        parts.append("--command -- <REQUIRED: argv for the player CLI>")
+    return [f"{plan.actor:>12} → " + " \\\n              ".join(parts)]
+
+
+def _emit_manual_fallback(
+    plans: list[ActorPlan],
+    blockers: dict[str, list[str]] | None = None,
+) -> None:
+    """Print per-actor copy-pasteable manual commands to stdout.
+
+    ``blockers`` (if provided) renders each actor's readiness errors immediately
+    above its command — gives the operator everything needed to either fix the
+    blocker or run the command by hand.
+    """
+
+    print("manual fallback commands (one per actor):")
+    print()
+    for plan in plans:
+        if blockers:
+            for message in blockers.get(plan.actor, []):
+                print(f"  ! {plan.actor}: {message}")
+        for line in _fallback_lines_for_plan(plan):
+            print(line)
+        print()
+
+
+# ---------------------------------------------------------------------------
+# Top-level entry point
+# ---------------------------------------------------------------------------
+
+
+def _summarize_results(
+    plans: list[ActorPlan],
+    *,
+    invoke_rcs: dict[str, int],
+    capture_rcs: dict[str, int],
+) -> int:
+    print()
+    print("run summary:")
+    overall = 0
+    for plan in plans:
+        invoke_rc = invoke_rcs.get(plan.actor, -1)
+        capture_rc = capture_rcs.get(plan.actor, 0)
+        status = "ok" if invoke_rc == 0 and capture_rc == 0 else "failed"
+        print(
+            f"  {plan.actor:>12}: status={status} invoke_rc={invoke_rc} "
+            f"capture_rc={capture_rc} raw={plan.raw_output_path}"
+        )
+        if status != "ok":
+            overall = 1
+    return overall
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """`consensus run` macro entry point."""
+
+    run = Path(args.run)
+    round_id = normalize_round_id(args.round)
+    phase = args.phase
+    requested = [actor.strip() for actor in args.actors.split(",")] if getattr(args, "actors", None) else None
+
+    if phase not in ("author", "reviewer", "rereview", "validator"):
+        eprint(f"error: unsupported phase: {phase}")
+        return 2
+
+    records = parse_run_records(run)
+    actors = _resolve_actors(records, round_id=round_id, phase=phase, requested=requested)
+    if not actors:
+        eprint(f"error: no actors resolved for phase={phase} round={round_id}")
+        return 2
+
+    cwd = getattr(args, "cwd", ".") or "."
+    plans = [
+        _build_plan(
+            records,
+            run,
+            round_id=round_id,
+            phase=phase,
+            actor=actor,
+            cwd=cwd,
+            idle_timeout_seconds=getattr(args, "idle_timeout_seconds", DEFAULT_IDLE_TIMEOUT_SECONDS),
+            stale_timeout_seconds=getattr(args, "stale_timeout_seconds", DEFAULT_STALE_TIMEOUT_SECONDS),
+            heartbeat_interval_seconds=getattr(args, "heartbeat_interval_seconds", DEFAULT_HEARTBEAT_INTERVAL_SECONDS),
+        )
+        for actor in actors
+    ]
+
+    print(f"resolved actors for phase={phase} round={round_id}: {', '.join(actors)}")
+
+    # Step 2 — prompt finalization (always, regardless of --execute-reviewers)
+    prompt_errors = _finalize_prompts(run, plans=plans)
+    if prompt_errors:
+        for message in prompt_errors:
+            eprint(f"error: {message}")
+        return 2
+
+    # Refresh records — prompt finalization may have written batch / artifact changes
+    records = parse_run_records(run)
+
+    # Step 3 — readiness per actor
+    blockers = _run_readiness(run, plans=plans)
+    has_blocker = any(messages for messages in blockers.values())
+
+    if not args.execute_reviewers:
+        # Dry-run path: print plan + readiness, exit 0 if clean, 3 if any blockers
+        print("dry-run plan (--execute-reviewers not passed):")
+        _emit_manual_fallback(plans, blockers=blockers)
+        return 3 if has_blocker else 0
+
+    # Step 1 — approval gate (truth table)
+    scoped_matches = all(
+        policy_allows_unattended_scoped(
+            records,
+            run_id=run.name,
+            round_id=round_id,
+            phase=phase,
+            actor=plan.actor,
+        )
+        for plan in plans
+    )
+    if not args.approved:
+        eprint("error: --execute-reviewers requires --approved (explicit operator approval)")
+        _emit_manual_fallback(plans, blockers=blockers)
+        return 1
+
+    if has_blocker:
+        eprint("error: invocation-ready failed for one or more actors; aborting before any launch")
+        _emit_manual_fallback(plans, blockers=blockers)
+        return 3
+
+    # Step 7 (precedes launches per design §Authoritative gating contract)
+    mechanism = "policy_unattended" if scoped_matches else "cli_approved_flag"
+    operator_identity = getattr(args, "operator_identity", None) or None
+    approval_path = _stamp_operator_approval(
+        run,
+        run_id=run.name,
+        round_id=round_id,
+        phase=phase,
+        actors=[plan.actor for plan in plans],
+        mechanism=mechanism,
+        operator_identity=operator_identity,
+    )
+    print(f"stamped OperatorApproval ({mechanism}): {approval_path}")
+
+    # Steps 4–6 — launch + capture
+    invoke_rcs = _launch_all(run, plans=plans, sequential=bool(getattr(args, "sequential", False)))
+    capture_rcs = _capture_all(run, plans=plans, exit_codes=invoke_rcs)
+
+    overall = _summarize_results(plans, invoke_rcs=invoke_rcs, capture_rcs=capture_rcs)
+    return overall
+
+
+__all__ = [
+    "ActorPlan",
+    "cmd_run",
+    "_resolve_actors",
+    "_build_plan",
+    "_finalize_prompts",
+    "_run_readiness",
+    "_launch_all",
+    "_capture_all",
+    "_emit_manual_fallback",
+    "_stamp_operator_approval",
+    "_fallback_lines_for_plan",
+]

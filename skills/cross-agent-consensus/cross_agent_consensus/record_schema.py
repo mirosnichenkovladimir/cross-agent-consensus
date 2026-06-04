@@ -195,6 +195,15 @@ REQUIRED_FIELDS = {
         "diagnostics",
         "redactions",
     ],
+    "OperatorApproval": [
+        "operator_approval_id",
+        "approved_actors",
+        "scope_run_id",
+        "scope_round_id",
+        "scope_phase",
+        "mechanism",
+        "operator_identity_or_null",
+    ],
 }
 
 ENUMS = {
@@ -216,6 +225,7 @@ ENUMS = {
         "abort_run",
     },
     "terminal_condition": {"consensus_reached", "round_limit_reached", "escalated_to_human", "aborted"},
+    "mechanism": {"cli_approved_flag", "policy_unattended"},
 }
 
 FIELD_ALIASES: dict[str, dict[str, str]] = {
@@ -253,4 +263,5 @@ ID_FIELDS = {
     "TerminationRecord": "termination_record_id",
     "FinalReport": "final_report_id",
     "ConfigResolution": "config_resolution_id",
+    "OperatorApproval": "operator_approval_id",
 }

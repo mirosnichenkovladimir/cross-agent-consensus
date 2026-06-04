@@ -10,7 +10,7 @@
     },
     {
       "path": "VERSION",
-      "sha256": "9c788a838dc1f6bfd80fa39757a95f94260071c35011c9a05301da1c73507657"
+      "sha256": "a66780da23103beaf12432b418508966b31a2a3a787f9468a5b6cdaa8667c1ef"
     },
     {
       "path": "config/defaults.yaml",
@@ -52,7 +52,7 @@
     },
     {
       "path": "cross_agent_consensus/invocation/readiness.py",
-      "sha256": "766f668d9541c0ca2d0975f11d12468f43cf4e39517822e2e1d9db26b2983461"
+      "sha256": "a415e3c224a1b04eaffc0f071ecdc3f0c5a35ad07e829c347300b57da542092d"
     },
     {
       "path": "cross_agent_consensus/invocation/selftest.py",
@@ -72,8 +72,8 @@
     },
     {
       "path": "cross_agent_consensus/cli.py",
-      "sha256": "9540c231a455381fc658828f8435bf397f38d5bfac6e2deb434d85622097290d",
-      "bytes": 56481
+      "sha256": "852220dae179b56669310976f865beb8fd69a921925c580df970dc5a1c06e4cf",
+      "bytes": 58845
     },
     {
       "path": "cross_agent_consensus/normalize.py",
@@ -111,11 +111,15 @@
     },
     {
       "path": "cross_agent_consensus/record_schema.py",
-      "sha256": "ad2ee7e1acdde6f465f7752d12eacfc6c4a73f7857070fa963f0a09b17e1d5b4"
+      "sha256": "ae4bf57a5b05aaf80418e712839475516684c771f694b29ba70e3c5736b6cc70"
     },
     {
       "path": "cross_agent_consensus/records.py",
       "sha256": "d709e8935f361ed6d322dfd8caec4bd5454e774f913e68a108caa0f427ff5cf6"
+    },
+    {
+      "path": "cross_agent_consensus/run_macro.py",
+      "sha256": "7cc081c8a05dfda306d93efd9334c8499322f861094825bf21c16042e13a6eb0"
     },
     {
       "path": "cross_agent_consensus/run_store.py",

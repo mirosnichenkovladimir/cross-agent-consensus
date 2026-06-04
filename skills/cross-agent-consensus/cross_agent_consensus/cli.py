@@ -79,6 +79,7 @@ from cross_agent_consensus.prompts import (
     select_artifact,
     select_review_batch,
 )
+from cross_agent_consensus.run_macro import cmd_run
 from cross_agent_consensus.run_store import run_id_from_task
 from cross_agent_consensus.termination import terminal_body
 from cross_agent_consensus.validation import (
@@ -1234,6 +1235,36 @@ def build_parser() -> argparse.ArgumentParser:
     ready.add_argument("--approved", action="store_true")
     ready.add_argument("--command", nargs=argparse.REMAINDER)
     ready.set_defaults(func=cmd_invocation_ready)
+
+    run = sub.add_parser(
+        "run",
+        help="Execute one same-round phase end-to-end (prompt -> ready -> invoke -> capture).",
+    )
+    add_common_run_arg(run)
+    run.add_argument("--round", required=True)
+    run.add_argument("--phase", choices=["author", "reviewer", "rereview", "validator"], required=True)
+    run.add_argument("--actors", help="Comma-separated subset; default = all actors named for this phase in this round.")
+    run.add_argument(
+        "--execute-reviewers",
+        action="store_true",
+        help="Actually launch agents (otherwise dry-run: prompts + readiness only).",
+    )
+    run.add_argument(
+        "--approved",
+        action="store_true",
+        help="Operator approval for unattended invocation. Required with --execute-reviewers.",
+    )
+    run.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Run actors one at a time (default: parallel). Debug/resource escape hatch.",
+    )
+    run.add_argument("--cwd", default=".")
+    run.add_argument("--idle-timeout-seconds", type=float, default=DEFAULT_IDLE_TIMEOUT_SECONDS)
+    run.add_argument("--stale-timeout-seconds", type=float, default=DEFAULT_STALE_TIMEOUT_SECONDS)
+    run.add_argument("--heartbeat-interval-seconds", type=float, default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS)
+    run.add_argument("--operator-identity", help="Optional operator identity stamped on OperatorApproval.")
+    run.set_defaults(func=cmd_run)
 
     invoke = sub.add_parser("invoke-agent", help="Start one explicit agent player invocation and record telemetry.")
     add_common_run_arg(invoke)
