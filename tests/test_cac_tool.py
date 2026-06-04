@@ -649,6 +649,37 @@ class ConsensusToolTests(unittest.TestCase):
             prompt = run / "rounds" / "round-002" / "prompts" / "reviewers" / "reviewer-codex.md"
             self.assertIn("Mode: regression_check", prompt.read_text(encoding="utf-8"))
 
+    def test_init_dry_run_prints_layout_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            runs_root = tmp / "runs"
+
+            result = self.run_cli(
+                "init",
+                "--task",
+                "Dry-run init",
+                "--artifact-locator",
+                "README.md",
+                "--author",
+                "author-codex",
+                "--orchestrator",
+                "orchestrator-codex",
+                "--reviewer",
+                "reviewer-codex",
+                "--allow-reviewer-config-override",
+                "--human-supervisor",
+                "none",
+                "--run-root",
+                str(runs_root),
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertFalse(runs_root.exists(), "dry-run must not create runs root")
+            self.assertIn("would create run:", result.stdout)
+            self.assertIn("run_id: dry-run-init-consensus-001", result.stdout)
+            self.assertIn("would write files:", result.stdout)
+            self.assertIn("run.md", result.stdout)
+
     def test_prompt_dry_run_resolves_target_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name))

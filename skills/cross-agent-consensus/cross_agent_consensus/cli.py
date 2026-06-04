@@ -163,11 +163,25 @@ def cmd_init(args: argparse.Namespace) -> int:
         run_id = args.run_id or run_id_from_task(args.task, run_root)
         safe_relative_path(run_id, "run_id")
         run = run_root / run_id
-        if run.exists() and not args.allow_existing:
+        if run.exists() and not args.allow_existing and not args.dry_run:
             eprint(f"error: run already exists: {run}")
             return 1
         created_at = utc_now()
         files = build_init_files(args, run_id, created_at)
+        if args.dry_run:
+            status = "would reuse existing run" if run.exists() else "would create run"
+            print(f"{status}: {run}")
+            print(f"run_id: {run_id}")
+            print(f"layout: {DEFAULT_LAYOUT}")
+            print("would write files:")
+            for path in sorted(files):
+                marker = "exists" if path.exists() else "new"
+                print(f"  - [{marker}] {path}")
+            if resolution.warnings:
+                print("config warnings:")
+                for message in resolution.warnings:
+                    print(f"  - {message}")
+            return 0
         make_run_tree(run, layout=DEFAULT_LAYOUT)
         for path, content in files.items():
             if path.exists() and args.allow_existing:
@@ -1057,6 +1071,14 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--unattended-invocation", action="store_true")
     init.add_argument("--unattended-scope", action="append")
     init.add_argument("--allow-existing", action="store_true")
+    init.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Resolve config and intended file layout, print them, and exit 0 "
+            "without creating directories or writing records."
+        ),
+    )
     init.set_defaults(func=cmd_init)
 
     config = sub.add_parser("config", help="Inspect, validate, or write CAC configuration.")
