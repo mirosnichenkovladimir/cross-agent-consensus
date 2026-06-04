@@ -67,10 +67,29 @@ def allocate_agent_session(run: Path, round_value: str | None, actor_identity: s
         session = actor_dir / f"session-{index:03d}"
         try:
             session.mkdir(parents=True, exist_ok=False)
-            return agent_session_paths(session)
+            paths = agent_session_paths(session)
+            _supersede_previous_failed_sessions(actor_dir, by_session=session.name)
+            return paths
         except FileExistsError:
             continue
     raise FileExistsError(f"unable to allocate agent session under {actor_dir}")
+
+
+def _supersede_previous_failed_sessions(actor_dir: Path, *, by_session: str) -> None:
+    """Stamp any prior failed sessions in ``actor_dir`` as superseded by ``by_session``.
+
+    A new session implies the operator chose to retry; previously failed
+    attempts in the same actor directory are recovered evidence, not active
+    failures. Imported here (not at module top) to avoid a circular import via
+    ``telemetry`` -> ``session_paths``.
+    """
+    from .telemetry import mark_state_superseded_by
+
+    for path in sorted(actor_dir.glob("session-*")):
+        if not path.is_dir() or path.name == by_session:
+            continue
+        state_path = path / "state.json"
+        mark_state_superseded_by(state_path, by_session=by_session)
 
 
 def latest_agent_session(

@@ -6,15 +6,15 @@
   "managed_files": [
     {
       "path": "SKILL.md",
-      "sha256": "5b11f9e70acc44741f7d85e7d3b914748a28939fb635522f83c9ed71855e90bb"
+      "sha256": "9256deb3d565af398268c05826bb8d4cd87bf86704d512dfee04c4d718c3589f"
     },
     {
       "path": "VERSION",
-      "sha256": "9d8c94f1ad3ea96b1e2ac4914fda4cb93c76b4a3e0d8cc6dd8976d6c0b227d15"
+      "sha256": "179a5390966e85c2071a87c1b31de13df67460665196f6529f8c4986842f81e5"
     },
     {
       "path": "config/defaults.yaml",
-      "sha256": "b2a3dea249bd0c18a9c30fd48d9a7bcb69c11f741dca371141666e8645e88927"
+      "sha256": "9eb25d7d48d5c8fead1d73972ec82037e2eb66ecbd7617ceadeaa635128a05d5"
     },
     {
       "path": "config/config.local.example.yaml",
@@ -48,11 +48,11 @@
     },
     {
       "path": "cross_agent_consensus/invocation/process_monitor.py",
-      "sha256": "74fc0437698309fc6cd1c5bce3e41e173b33a1f7c778696e2df4cb4f68925d4c"
+      "sha256": "d1f6b0be1be782e8c8e566d153f61c247eb4e10838308bac530097db1c80a6e5"
     },
     {
       "path": "cross_agent_consensus/invocation/readiness.py",
-      "sha256": "a415e3c224a1b04eaffc0f071ecdc3f0c5a35ad07e829c347300b57da542092d"
+      "sha256": "12f014239829dbcff8d52ff02421caacecedd95c3ae9d698142b4a2ac722c2e5"
     },
     {
       "path": "cross_agent_consensus/invocation/selftest.py",
@@ -60,20 +60,20 @@
     },
     {
       "path": "cross_agent_consensus/invocation/session_paths.py",
-      "sha256": "b90ff110d3b124af6b896b538d31ec18601a09d140e58007f0d5c40dea71b4d1"
+      "sha256": "f4370535d1cd4882418f921d73d03136337dcd820b52f59ea45026d937a94b3d"
     },
     {
       "path": "cross_agent_consensus/invocation/status.py",
-      "sha256": "daf29ae03c6f106dca23b31c498950df24af8c4ca330680f40df866d0ddc4be7"
+      "sha256": "8715d63b365513cc421a0982c13f65b1dea7e04ccdbb1d02c006444473e766ce"
     },
     {
       "path": "cross_agent_consensus/invocation/telemetry.py",
-      "sha256": "a6972ccbd600d367e27ec2aeb8c5ab03c899f0678fae511deebc27cc3a5b3c6a"
+      "sha256": "81e24ce3bb8f15aadda62d1b9e1a576184905aac7e2b1dd1bc84f8cfaaaad035"
     },
     {
       "path": "cross_agent_consensus/cli.py",
-      "sha256": "ae14e420b91bf8444376e0938d55c98f34b9a0a674116dcf8b6a8a60cf5a98dd",
-      "bytes": 59642
+      "sha256": "1630446811b187256e5f53f0266bc58e76c4e87d42415bc879439207926eab99",
+      "bytes": 59667
     },
     {
       "path": "cross_agent_consensus/normalize.py",

@@ -240,6 +240,66 @@ def player_command_telemetry_errors(player_id: str, command: list[str]) -> list[
     return messages
 
 
+def codex_trusted_dir_errors(player_id: str, command: list[str]) -> list[str]:
+    """Surface the trusted-dir trap before launching Codex CLI.
+
+    Codex CLI refuses to operate outside its on-disk trust list unless
+    ``--skip-git-repo-check`` is in argv. When the trap fires, the failure
+    arrives only after a session has been allocated; ``state.json`` ends up
+    ``failed`` and ``consensus status`` reports a noisy ``failed=`` count for
+    what is really an environment problem.
+
+    Pre-flight: require ``--skip-git-repo-check`` for any ``codex-cli`` launch.
+    Operators with a Codex-trusted cwd lose nothing — the flag is a no-op for
+    them. Operators outside trust get an actionable command instead of a
+    failed session record.
+    """
+    if player_id != "codex-cli" or not command:
+        return []
+    if not _command_invokes_codex_binary(command):
+        # Custom wrappers / test stubs that aren't the real codex binary don't
+        # hit the trusted-dir trap; let the rest of readiness validate them.
+        return []
+    if command_has_arg(command, "--skip-git-repo-check"):
+        return []
+    suggestion = _suggest_codex_command_with_skip(command)
+    return [
+        "--player codex-cli requires --skip-git-repo-check to avoid the trusted-directory trap; "
+        f"add the flag, e.g.: {suggestion}",
+    ]
+
+
+def _command_invokes_codex_binary(command: list[str]) -> bool:
+    """True when ``command[0]`` is the real ``codex`` CLI.
+
+    Matches either the bare basename ``codex`` or an absolute/relative path
+    ending in ``/codex``. Wrappers, ``python``-stubs, and arbitrary scripts
+    used in tests are correctly treated as not-codex.
+    """
+    if not command:
+        return False
+    head = command[0]
+    return head == "codex" or head.endswith("/codex")
+
+
+def _suggest_codex_command_with_skip(command: list[str]) -> str:
+    """Build a copy-pasteable codex argv with ``--skip-git-repo-check`` inserted.
+
+    Insert after the ``codex exec`` head if present, otherwise immediately
+    after the ``codex`` entry. Falls back to appending when neither matches so
+    the operator always gets a runnable command.
+    """
+    patched = list(command)
+    flag = "--skip-git-repo-check"
+    if len(patched) >= 2 and patched[0].endswith("codex") and patched[1] == "exec":
+        patched.insert(2, flag)
+    elif patched and patched[0].endswith("codex"):
+        patched.insert(1, flag)
+    else:
+        patched.append(flag)
+    return command_for_display(patched)
+
+
 def invocation_ready_errors(run: Path, args: argparse.Namespace, command: list[str]) -> list[str]:
     records = parse_run_records(run)
     participants = first_record(records, "Participants")
@@ -271,6 +331,7 @@ def invocation_ready_errors(run: Path, args: argparse.Namespace, command: list[s
     if not command:
         messages.append("explicit runtime command/provider selection is required")
     messages.extend(player_command_telemetry_errors(getattr(args, "player", "generic-cli"), command))
+    messages.extend(codex_trusted_dir_errors(getattr(args, "player", "generic-cli"), command))
     command_name = command[0] if command else None
     if command_name and shutil.which(command_name) is None:
         messages.append(f"command is not executable on PATH: {command_name}")

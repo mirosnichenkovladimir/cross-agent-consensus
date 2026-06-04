@@ -1017,7 +1017,10 @@ class ConsensusToolTests(unittest.TestCase):
         self.assertEqual(payload["effective"]["participants"]["author"], "codex-primary")
         self.assertEqual(payload["effective"]["participants"]["reviewers"], ["codex", "claude"])
         self.assertEqual(payload["effective"]["participants"]["human_supervisor"], "none")
-        self.assertEqual(payload["effective"]["reviewer_clis"]["codex"]["command"], ["codex", "exec", "--json", "-"])
+        self.assertEqual(
+            payload["effective"]["reviewer_clis"]["codex"]["command"],
+            ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
+        )
         self.assertEqual(
             payload["effective"]["reviewer_clis"]["claude"]["command"],
             ["claude", "-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"],

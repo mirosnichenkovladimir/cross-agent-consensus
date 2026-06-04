@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.9.1] - 2026-06-04
+
+### Added
+- Codex trusted-directory preflight in `invoke-agent` and `invocation-ready`.
+  When `--player codex-cli` is launched with the real `codex` binary but argv
+  is missing `--skip-git-repo-check`, both commands now surface the exact
+  command-line fix and exit `3` **before** allocating a session. Operators
+  outside Codex's trusted-dir list previously got a `failed` session record
+  and a noisy `failed=` count in `consensus status` for a fully recoverable
+  environment problem. The check is restricted to the real `codex` binary
+  (matches `codex` or `*/codex`); wrappers and test stubs under the
+  `codex-cli` player are not blocked.
+- `--skip-git-repo-check` added to the default `reviewer_clis.codex.command`
+  in `config/defaults.yaml` and the installed-default fallback in
+  `cross_agent_consensus/cli.py`. Existing local overrides should add the
+  flag (the preflight surfaces the fix automatically).
+- Failed-session supersession bookkeeping. When `allocate_agent_session`
+  creates a new session in an actor directory that already contains a
+  previously failed attempt, the older `state.json` is atomically stamped
+  with `superseded_by: <new-session-name>` and `superseded_at`. The new
+  helper `mark_state_superseded_by` only acts on `state == "failed"`
+  and is idempotent.
+- `agent_session_state_counts` buckets superseded sessions under
+  `"superseded"` instead of `"failed"`. A Codex first-attempt that the
+  operator successfully retried no longer inflates the `failed=` count
+  surfaced by `consensus status`.
+- `prepare_agent_session` writes an initial `state.json` with
+  `state="prepared"` **before** `subprocess.Popen`. A pre-exec failure
+  (executable not on PATH, cwd missing, interpreter set-up errors) now
+  leaves durable launch evidence on disk instead of an empty session dir.
+
+### References
+- Triage: `plans_and_designs/cac-design-notes/feedback-notes-04-06/prioritization-opinion/tier-5-phase-7-followup/README.md`
+  (bundle T5-A; covers Phase-7 items #1, #2 partial, #3).
+
 ## [0.9.0] - 2026-06-04
 
 ### Added

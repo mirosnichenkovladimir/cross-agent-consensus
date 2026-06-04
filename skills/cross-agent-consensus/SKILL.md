@@ -139,7 +139,7 @@ When a participant is named as a CLI/runtime reviewer or validator, such as Code
 For first-class runtime telemetry, use structured stream modes:
 
 - Claude CLI: `claude -p --verbose --output-format stream-json --include-partial-messages ...`
-- Codex CLI: `codex exec --json -`
+- Codex CLI: `codex exec --skip-git-repo-check --json -` (the `--skip-git-repo-check` flag is required by `invoke-agent` so that Codex doesn't refuse to start in directories it has not been explicitly trusted; supervised launch surfaces the fix command and exits before allocating a session when it is missing.)
 
 Before normalizing a named CLI reviewer result, check that `scripts/consensus agent-status --run <run> --actor <actor>` succeeds and points to the expected session. If it reports a missing session, rerun that reviewer through `invoke-agent` or explicitly record that the evidence was direct/manual capture without runtime telemetry.
 

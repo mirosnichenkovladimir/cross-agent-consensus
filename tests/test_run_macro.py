@@ -203,7 +203,7 @@ class FallbackPrinterTests(unittest.TestCase):
         from cross_agent_consensus.cli import build_parser
         from cross_agent_consensus.invocation.readiness import normalize_command_separator
 
-        plan = self._plan(["codex", "exec", "--json", "-"])
+        plan = self._plan(["codex", "exec", "--skip-git-repo-check", "--json", "-"])
         lines = _fallback_lines_for_plan(plan)
         self.assertEqual(len(lines), 1)
         body = lines[0].split(" → ", 1)[1].replace(" \\\n              ", " ")
@@ -235,7 +235,7 @@ class DryRunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = _stage_run(tmp, reviewers=["codex", "claude"])
-            _append_config_resolution(run, {"codex": ["codex", "exec", "--json", "-"], "claude": ["claude", "-p", "--verbose", "--output-format", "stream-json"]})
+            _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"], "claude": ["claude", "-p", "--verbose", "--output-format", "stream-json"]})
             rc, stdout, _stderr = _capture_run(_run_args(run))
         self.assertEqual(rc, 0, stdout)
         self.assertIn("manual fallback commands", stdout)
@@ -260,7 +260,7 @@ class ExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = _stage_run(tmp, reviewers=["codex"])
-            _append_config_resolution(run, {"codex": ["codex", "exec", "--json", "-"]})
+            _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             rc, stdout, stderr = _capture_run(_run_args(run, execute_reviewers=True, approved=False))
         self.assertEqual(rc, 1)
         self.assertIn("requires --approved", stderr)
@@ -271,7 +271,7 @@ class ExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = _stage_run(tmp, reviewers=["codex"])
-            _append_config_resolution(run, {"codex": ["codex", "exec", "--json", "-"]})
+            _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             with (
                 mock.patch("cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent", return_value=0) as m_invoke,
                 mock.patch("cross_agent_consensus.cli.cmd_capture", return_value=0) as m_capture,
@@ -300,7 +300,7 @@ class ExecutionTests(unittest.TestCase):
                 reviewers=["codex"],
                 unattended_scope=["phase:reviewer", "actor:codex"],
             )
-            _append_config_resolution(run, {"codex": ["codex", "exec", "--json", "-"]})
+            _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             with (
                 mock.patch("cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent") as m_invoke,
                 mock.patch("cross_agent_consensus.cli.cmd_capture", return_value=0),
@@ -324,7 +324,7 @@ class ExecutionTests(unittest.TestCase):
             run = _stage_run(tmp, reviewers=["codex", "claude"])
             _append_config_resolution(
                 run,
-                {"codex": ["codex", "exec", "--json", "-"], "claude": ["claude", "-p", "--verbose", "--output-format", "stream-json"]},
+                {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"], "claude": ["claude", "-p", "--verbose", "--output-format", "stream-json"]},
             )
             seen_no_append: dict[str, bool] = {}
 
@@ -358,7 +358,7 @@ class ExecutionTests(unittest.TestCase):
             tmp = Path(tmp_name)
             run = _stage_run(tmp, reviewers=["codex", "claude"])
             # Only codex has a runtime command; claude is missing → blocker
-            _append_config_resolution(run, {"codex": ["codex", "exec", "--json", "-"]})
+            _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             with (
                 mock.patch("cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent") as m_invoke,
                 mock.patch("cross_agent_consensus.cli.cmd_capture") as m_capture,

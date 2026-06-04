@@ -399,7 +399,7 @@ def setup_config_payload() -> dict[str, Any]:
     if shutil.which("codex"):
         reviewers.append("codex-independent-reviewer")
         reviewer_clis["codex-independent-reviewer"] = {
-            "command": ["codex", "exec", "--json", "-"],
+            "command": ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
             "prompt_transport": "stdin",
             "stdout_capture": "raw_output",
             "stderr_capture": "raw_error",

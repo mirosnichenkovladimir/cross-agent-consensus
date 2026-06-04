@@ -291,6 +291,27 @@ def write_agent_exit(
     )
 
 
+def mark_state_superseded_by(state_path: Path, *, by_session: str) -> bool:
+    """Stamp an existing state.json with ``superseded_by`` / ``superseded_at``.
+
+    Returns True when the file was modified, False when it was missing, not in a
+    failed terminal state, or already superseded. Atomic via :func:`atomic_write_json`.
+
+    Idempotent: re-running with the same ``by_session`` does not change the file.
+    """
+    if not state_path.is_file():
+        return False
+    state = read_json_file(state_path)
+    if state.get("state") != "failed":
+        return False
+    if state.get("superseded_by") == by_session:
+        return False
+    state["superseded_by"] = by_session
+    state["superseded_at"] = utc_now()
+    atomic_write_json(state_path, state)
+    return True
+
+
 def record_failed_agent_session(
     paths: AgentSessionPaths,
     invocation: AgentInvocation,

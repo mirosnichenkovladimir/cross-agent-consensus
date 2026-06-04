@@ -68,10 +68,20 @@ def agent_status_summary(paths: AgentSessionPaths) -> dict[str, int]:
 
 
 def agent_session_state_counts(run: Path) -> dict[str, int]:
+    """Aggregate per-state session counts.
+
+    Sessions with ``superseded_by`` set (a later session in the same actor dir
+    replaced this failed attempt) are bucketed under ``superseded`` instead of
+    their stored state, so a recovered Codex first-attempt does not noisily
+    inflate the ``failed=`` count.
+    """
     counts: dict[str, int] = {}
     for state_path in sorted(run.glob("rounds/round-*/agents/*/session-*/state.json")):
         state_payload = read_json_file(state_path)
-        state = str(state_payload.get("state") or "unknown")
+        if state_payload.get("superseded_by"):
+            state = "superseded"
+        else:
+            state = str(state_payload.get("state") or "unknown")
         counts[state] = counts.get(state, 0) + 1
     return counts
 

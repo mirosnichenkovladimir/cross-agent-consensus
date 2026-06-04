@@ -18,6 +18,7 @@ from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths, Com
 
 from .adapters import GenericCliPlayer, ManualPlayer, get_player_adapter
 from .readiness import (
+    codex_trusted_dir_errors,
     command_for_display,
     invocation_ready_errors,
     invoke_agent_round_path_errors,
@@ -159,6 +160,24 @@ def prepare_agent_session(args: argparse.Namespace, command: list[str]) -> tuple
     write_invocation_json(paths, invocation)
     write_command_json(paths, command_spec)
     copy_prompt_for_session(paths, invocation.prompt_path)
+    # Write an initial state.json BEFORE subprocess.Popen so durable launch
+    # evidence exists even if exec itself raises (executable not on PATH, cwd
+    # missing, etc.). The exception handler in run_generic_agent only writes
+    # state via record_failed_agent_session AFTER the try-block enters; a
+    # pre-Popen failure during interpreter setup would leave nothing without
+    # this write.
+    write_agent_state(
+        paths,
+        invocation,
+        "prepared",
+        pid=None,
+        process_group_id=None,
+        started_at=None,
+        process_start_time=None,
+        last_agent_activity_at=None,
+        last_monitor_heartbeat_at=utc_now(),
+        idle_seconds=0.0,
+    )
     append_agent_event(paths, invocation, "prepared", command_path=session_relative(paths.command, paths.session))
     return invocation, paths, command_spec
 
@@ -367,6 +386,15 @@ def cmd_invoke_agent(args: argparse.Namespace) -> int:
             print(f"session: {paths.session}")
             record_failed_agent_session(paths, invocation, reason)
             for message in secret_messages:
+                eprint(f"error: {message}")
+            return 3
+        # Fail before session allocation when a player-specific runtime trap is
+        # detectable from argv alone (e.g. Codex without --skip-git-repo-check).
+        # Allocating a session for an environment problem inflates the failed=
+        # count in `consensus status` for what is operator-fixable.
+        trusted_dir_messages = codex_trusted_dir_errors(args.player, command)
+        if trusted_dir_messages:
+            for message in trusted_dir_messages:
                 eprint(f"error: {message}")
             return 3
         invocation, paths, command_spec = prepare_agent_session(args, command)

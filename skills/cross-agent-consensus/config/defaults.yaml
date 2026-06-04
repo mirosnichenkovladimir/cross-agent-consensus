@@ -18,6 +18,7 @@ reviewer_clis:
     command:
       - codex
       - exec
+      - --skip-git-repo-check
       - --json
       - "-"
     prompt_transport: stdin
