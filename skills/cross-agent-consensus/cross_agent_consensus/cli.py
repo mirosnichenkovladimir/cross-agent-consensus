@@ -1186,7 +1186,15 @@ def build_parser() -> argparse.ArgumentParser:
     ready.add_argument("--actor", required=True)
     ready.add_argument("--player", default="generic-cli")
     ready.add_argument("--prompt", required=True)
-    ready.add_argument("--raw-output", required=True)
+    ready.add_argument(
+        "--raw-output",
+        required=True,
+        help=(
+            "Pre-declared path for raw stdout/event-stream capture. invoke-agent mirrors "
+            "stdout here and writes the extracted parsed result to a "
+            "<raw-output>.final-output.md sibling. invocation-ready uses it for path planning only."
+        ),
+    )
     ready.add_argument("--approved", action="store_true")
     ready.add_argument("--command", nargs=argparse.REMAINDER)
     ready.set_defaults(func=cmd_invocation_ready)
@@ -1198,7 +1206,15 @@ def build_parser() -> argparse.ArgumentParser:
     invoke.add_argument("--actor", required=True)
     invoke.add_argument("--player", required=True)
     invoke.add_argument("--prompt", required=True)
-    invoke.add_argument("--raw-output", required=True)
+    invoke.add_argument(
+        "--raw-output",
+        required=True,
+        help=(
+            "Path that receives a copy of raw stdout (event stream for JSON-mode CLIs). "
+            "On success, the extracted final-output is also mirrored to "
+            "<raw-output>.final-output.md beside this path."
+        ),
+    )
     invoke.add_argument("--cwd", default=".")
     invoke.add_argument("--approved", action="store_true")
     invoke.add_argument("--idle-timeout-seconds", type=float, default=DEFAULT_IDLE_TIMEOUT_SECONDS)

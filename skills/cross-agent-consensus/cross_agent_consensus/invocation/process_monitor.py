@@ -300,6 +300,14 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
             shutil.copyfile(paths.stdout, invocation.raw_output_path)
             final_output = adapter.extract_final_output(paths)
             final_output_path = session_relative(final_output, paths.session)
+            # Mirror the extracted final-output beside --raw-output so the path the
+            # orchestrator pre-declared also leads to the parsed result, not only
+            # the raw stdout event stream.
+            if final_output.is_file():
+                final_output_mirror = invocation.raw_output_path.with_suffix(
+                    invocation.raw_output_path.suffix + ".final-output.md"
+                )
+                shutil.copyfile(final_output, final_output_mirror)
             append_agent_event(paths, invocation, "completed", exit_code=return_code)
         else:
             final_state = "failed"

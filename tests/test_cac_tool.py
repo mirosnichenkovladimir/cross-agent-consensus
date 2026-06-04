@@ -2009,6 +2009,12 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual(exit_payload["exit_code_or_null"], 0)
             self.assertIn("final:# Cross-Agent Consensus Reviewer Prompt", (session / "final-output.md").read_text())
             self.assertIn("final:# Cross-Agent Consensus Reviewer Prompt", raw_output.read_text(encoding="utf-8"))
+            # `--raw-output` declares one path; invoke-agent mirrors the extracted
+            # final-output beside it so the orchestrator can read parsed content
+            # from a predictable sibling without descending into session-NNN/.
+            final_mirror = raw_output.with_suffix(raw_output.suffix + ".final-output.md")
+            self.assertTrue(final_mirror.is_file(), f"missing mirror: {final_mirror}")
+            self.assertEqual(final_mirror.read_text(encoding="utf-8"), (session / "final-output.md").read_text())
             agent_log = [json.loads(line) for line in (session / "agent.log").read_text(encoding="utf-8").splitlines()]
             self.assertTrue(any(entry["native_type"] == "stdout_text" for entry in agent_log))
             events = [
