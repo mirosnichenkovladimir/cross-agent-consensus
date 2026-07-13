@@ -274,7 +274,7 @@ class ExecutionTests(unittest.TestCase):
             _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             with (
                 mock.patch("cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent", return_value=0) as m_invoke,
-                mock.patch("cross_agent_consensus.cli.cmd_capture", return_value=0) as m_capture,
+                mock.patch("cross_agent_consensus.capture.cmd_capture", return_value=0) as m_capture,
             ):
                 # invoke-agent is expected to write the raw-output mirror; simulate it
                 def fake_invoke(args):
@@ -303,7 +303,7 @@ class ExecutionTests(unittest.TestCase):
             _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             with (
                 mock.patch("cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent") as m_invoke,
-                mock.patch("cross_agent_consensus.cli.cmd_capture", return_value=0),
+                mock.patch("cross_agent_consensus.capture.cmd_capture", return_value=0),
             ):
                 def fake_invoke(args):
                     Path(args.raw_output).parent.mkdir(parents=True, exist_ok=True)
@@ -343,7 +343,7 @@ class ExecutionTests(unittest.TestCase):
                     "cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent",
                     side_effect=fake_invoke,
                 ),
-                mock.patch("cross_agent_consensus.cli.cmd_capture", side_effect=fake_capture),
+                mock.patch("cross_agent_consensus.capture.cmd_capture", side_effect=fake_capture),
             ):
                 rc, stdout, _stderr = _capture_run(
                     _run_args(run, execute_reviewers=True, approved=True, sequential=True)
@@ -361,7 +361,7 @@ class ExecutionTests(unittest.TestCase):
             _append_config_resolution(run, {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]})
             with (
                 mock.patch("cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent") as m_invoke,
-                mock.patch("cross_agent_consensus.cli.cmd_capture") as m_capture,
+                mock.patch("cross_agent_consensus.capture.cmd_capture") as m_capture,
             ):
                 rc, _stdout, stderr = _capture_run(
                     _run_args(run, execute_reviewers=True, approved=True)

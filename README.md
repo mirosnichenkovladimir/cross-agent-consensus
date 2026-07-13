@@ -88,3 +88,13 @@ Use the protocol to review its own `specs/protocol.md`:
 - Orchestrator records findings and author responses.
 - Re-reviewers verify fixes or accept/reject rebuttals.
 - Human Supervisor is asked only at consensus or unresolved material disagreement.
+
+## Development checks
+
+The helper package supports Python 3.11 and 3.13. Install the pinned development tools and run both quality gates from the repository root:
+
+```bash
+python -m pip install --requirement requirements-dev.txt
+python -m pytest
+python -m mypy
+```

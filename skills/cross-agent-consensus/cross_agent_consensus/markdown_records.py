@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
 
-from cross_agent_consensus.models import Record
+from cross_agent_consensus.models import ParsedRecordFile, Record, RecordParseDiagnostic
 from cross_agent_consensus.record_schema import FIELD_ALIASES, ID_FIELDS, KNOWN_RECORD_TYPES
 
 
@@ -46,8 +47,14 @@ def parse_scalar(value: str) -> Any:
             return int(value)
         except ValueError:
             return value
-    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-        return value[1:-1]
+    if value.startswith('"') and value.endswith('"'):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return value[1:-1]
+        return decoded if isinstance(decoded, str) else value[1:-1]
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
     if value.startswith("[") and value.endswith("]"):
         inner = value[1:-1].strip()
         if not inner:
@@ -82,11 +89,11 @@ def parse_list(lines: list[str], index: int, indent: int) -> tuple[list[Any], in
                 items.append(None)
                 i += 1
             elif is_list_item(lines[j]):
-                child, i = parse_list(lines, j, count_indent(lines[j]))
-                items.append(child)
+                child_list, i = parse_list(lines, j, count_indent(lines[j]))
+                items.append(child_list)
             else:
-                child, i = parse_mapping(lines, j, count_indent(lines[j]))
-                items.append(child)
+                child_mapping, i = parse_mapping(lines, j, count_indent(lines[j]))
+                items.append(child_mapping)
     return items, i
 
 
@@ -165,22 +172,71 @@ def _apply_field_aliases(record_type: str, data: dict[str, Any]) -> None:
         data["_aliases_consumed"] = consumed
 
 
-def parse_records_from_file(path: Path) -> list[Record]:
+def _heading_line(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def _frontmatter_belongs_to_heading(
+    text: str,
+    heading_end: int,
+    record_frontmatter: tuple[str, int, int],
+) -> bool:
+    next_heading = re.search(r"^##\s+", text[heading_end:], re.MULTILINE)
+    if next_heading is None:
+        return True
+    _, frontmatter_start, _ = record_frontmatter
+    return frontmatter_start < heading_end + next_heading.start()
+
+
+def parse_records_with_diagnostics(path: Path) -> ParsedRecordFile:
     try:
         text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return []
+    except UnicodeDecodeError as exc:
+        return ParsedRecordFile(
+            records=[],
+            diagnostics=[RecordParseDiagnostic(path, 1, f"invalid UTF-8: {exc}")],
+        )
     records: list[Record] = []
+    diagnostics: list[RecordParseDiagnostic] = []
     for match in RECORD_HEADING_RE.finditer(text):
-        if match.group("record_type") not in KNOWN_RECORD_TYPES:
-            continue
+        heading_record_type = match.group("record_type")
         record_frontmatter = find_frontmatter_after(text, match.end())
+        if record_frontmatter is not None and not _frontmatter_belongs_to_heading(
+            text, match.end(), record_frontmatter
+        ):
+            record_frontmatter = None
+        if heading_record_type not in KNOWN_RECORD_TYPES:
+            if record_frontmatter is not None:
+                diagnostics.append(
+                    RecordParseDiagnostic(
+                        path,
+                        _heading_line(text, match.start()),
+                        f"unknown record type {heading_record_type}",
+                    )
+                )
+            continue
         if record_frontmatter is None:
+            diagnostics.append(
+                RecordParseDiagnostic(
+                    path,
+                    _heading_line(text, match.start()),
+                    f"{heading_record_type} heading has no frontmatter",
+                )
+            )
             continue
         block, _, _ = record_frontmatter
         data = parse_yaml_subset(block)
-        heading_line = text.count("\n", 0, match.start()) + 1
-        record_type = data.get("record_type") or match.group("record_type")
+        heading_line = _heading_line(text, match.start())
+        record_type = data.get("record_type") or heading_record_type
+        if str(record_type) not in KNOWN_RECORD_TYPES:
+            diagnostics.append(
+                RecordParseDiagnostic(
+                    path,
+                    heading_line,
+                    f"frontmatter declares unknown record type {record_type}",
+                )
+            )
+            continue
         _apply_field_aliases(str(record_type), data)
         id_field = ID_FIELDS.get(str(record_type))
         record_id = data.get(id_field) if id_field else None
@@ -205,7 +261,11 @@ def parse_records_from_file(path: Path) -> list[Record]:
                             data,
                         )
                     )
-    return records
+    return ParsedRecordFile(records=records, diagnostics=diagnostics)
+
+
+def parse_records_from_file(path: Path) -> list[Record]:
+    return parse_records_with_diagnostics(path).records
 
 
 def render_scalar(value: Any) -> str:
@@ -216,12 +276,14 @@ def render_scalar(value: Any) -> str:
     if value is False:
         return "false"
     text = str(value)
+    if isinstance(value, str) and parse_scalar(text) != value:
+        return json.dumps(value, ensure_ascii=False)
     if not text or text.startswith((" ", "{", "[", "&", "*", "#", "!", "|", ">", "@", "`")):
-        return '"' + text.replace('"', '\\"') + '"'
+        return json.dumps(text, ensure_ascii=False)
     if text in {"-", "?", ":"} or text.startswith(("- ", "? ", ": ")):
-        return '"' + text.replace('"', '\\"') + '"'
+        return json.dumps(text, ensure_ascii=False)
     if ":" in text and not re.match(r"^[A-Za-z]:", text):
-        return '"' + text.replace('"', '\\"') + '"'
+        return json.dumps(text, ensure_ascii=False)
     return text
 
 

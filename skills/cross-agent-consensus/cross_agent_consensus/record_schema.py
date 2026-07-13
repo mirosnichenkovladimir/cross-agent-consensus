@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import NoneType
+
 
 COMMON_FIELDS = [
     "record_type",
@@ -265,3 +267,69 @@ ID_FIELDS = {
     "ConfigResolution": "config_resolution_id",
     "OperatorApproval": "operator_approval_id",
 }
+
+
+LIST_FIELDS = {
+    "affected_finding_ids",
+    "affected_finding_ids_or_validator_ids",
+    "approved_actors",
+    "in_scope",
+    "out_of_scope",
+    "raw_finding_ids",
+    "redactions",
+    "required_validator_ids",
+    "review_modes_allowed",
+    "reviewer_identities",
+    "source_finding_ids",
+    "source_raw_finding_ids",
+    "sources",
+    "success_criteria",
+    "supporting_record_ids",
+    "unresolved_finding_ids",
+}
+
+MAPPING_FIELDS = {
+    "diagnostics",
+    "effective_values",
+    "materiality_rules",
+    "round_limits",
+    "validator_status",
+}
+
+BOOLEAN_FIELDS = {
+    "clarification_pending",
+    "is_first_round_independent",
+    "requires_new_artifact_version",
+}
+
+INTEGER_FIELDS = {
+    "max_fresh_review_rounds",
+    "max_remediation_rounds_per_finding",
+}
+
+NULLABLE_STRING_FIELDS = {
+    field
+    for fields in REQUIRED_FIELDS.values()
+    for field in fields
+    if field.endswith("_or_null")
+}
+
+REQUIRED_FIELD_TYPES: dict[str, tuple[type[object], ...]] = {}
+for _field in {field for fields in REQUIRED_FIELDS.values() for field in fields}:
+    if _field in LIST_FIELDS:
+        REQUIRED_FIELD_TYPES[_field] = (list,)
+    elif _field in MAPPING_FIELDS:
+        REQUIRED_FIELD_TYPES[_field] = (dict,)
+    elif _field in BOOLEAN_FIELDS:
+        REQUIRED_FIELD_TYPES[_field] = (bool,)
+    elif _field in INTEGER_FIELDS:
+        REQUIRED_FIELD_TYPES[_field] = (int,)
+    elif _field in NULLABLE_STRING_FIELDS:
+        REQUIRED_FIELD_TYPES[_field] = (str, NoneType)
+    else:
+        REQUIRED_FIELD_TYPES[_field] = (str,)
+
+
+def expected_type_label(field: str) -> str:
+    expected = REQUIRED_FIELD_TYPES[field]
+    return " or ".join(value.__name__ for value in expected)

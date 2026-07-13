@@ -5,7 +5,6 @@ import os
 import subprocess
 import shutil
 import hashlib
-import json
 import sys
 import tempfile
 import time

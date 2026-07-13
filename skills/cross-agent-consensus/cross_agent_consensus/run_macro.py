@@ -10,13 +10,14 @@ for the contract and truth table.
 
 from __future__ import annotations
 
-import argparse
 import concurrent.futures
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
 from cross_agent_consensus.invocation.adapters import PLAYER_ALIASES
+from cross_agent_consensus import capture
+from cross_agent_consensus.invocation import process_monitor
 from cross_agent_consensus.invocation.process_monitor import (
     DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     DEFAULT_IDLE_TIMEOUT_SECONDS,
@@ -29,7 +30,15 @@ from cross_agent_consensus.invocation.readiness import (
 from cross_agent_consensus.io import append_text, atomic_write_new, eprint, slugify, utc_now
 from cross_agent_consensus.layout import detect_run_layout, normalize_round_id, round_dir, DEFAULT_LAYOUT
 from cross_agent_consensus.markdown_records import frontmatter
-from cross_agent_consensus.models import Record
+from cross_agent_consensus.models import (
+    CaptureCommandInput,
+    InvocationCommandInput,
+    InvocationReadyInput,
+    PromptCommandInput,
+    Record,
+    RunCommandInput,
+)
+from cross_agent_consensus.prompt_command import cmd_prompt
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
 
 
@@ -221,23 +230,22 @@ def _finalize_prompts(run: Path, *, plans: list[ActorPlan]) -> list[str]:
     ``cmd_prompt``; existing finalized prompts are left untouched.
     """
 
-    from cross_agent_consensus.cli import cmd_prompt as _cmd_prompt  # late: avoid cli<->run_macro cycle
-
     errors: list[str] = []
     for plan in plans:
         if plan.prompt_path.is_file() and "draft" not in plan.prompt_path.name:
             continue
-        prompt_args = argparse.Namespace(
+        prompt_args = PromptCommandInput(
             run=str(run),
             phase=plan.phase,
             actor=plan.actor,
             round=plan.round_id,
             review_batch=None,
             artifact_version=plan.artifact_version_id,
+            output=None,
             force_draft=False,
             dry_run=False,
         )
-        rc = _cmd_prompt(prompt_args)
+        rc = cmd_prompt(prompt_args)
         if rc != 0:
             errors.append(f"prompt finalization failed for actor {plan.actor}: cmd_prompt returned {rc}")
             continue
@@ -260,7 +268,7 @@ def _run_readiness(run: Path, *, plans: list[ActorPlan]) -> dict[str, list[str]]
 
     per_actor: dict[str, list[str]] = {}
     for plan in plans:
-        readiness_args = argparse.Namespace(
+        readiness_args = InvocationReadyInput(
             run=str(run),
             actor=plan.actor,
             player=plan.player,
@@ -295,10 +303,8 @@ def _launch_all(
     Failed actors do **not** cancel siblings (round-level isolation contract).
     """
 
-    from cross_agent_consensus.invocation.process_monitor import cmd_invoke_agent as _cmd_invoke_agent  # late: cycle
-
     def _one(plan: ActorPlan) -> tuple[str, int]:
-        invoke_args = argparse.Namespace(
+        invoke_args = InvocationCommandInput(
             run=str(run),
             round=plan.round_id,
             phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
@@ -314,7 +320,7 @@ def _launch_all(
             command=list(plan.runtime_command),
         )
         try:
-            rc = _cmd_invoke_agent(invoke_args)
+            rc = process_monitor.cmd_invoke_agent(invoke_args)
         except Exception as exc:  # defensive — invoke-agent should not throw, but isolate
             eprint(f"error: invoke-agent raised for actor {plan.actor}: {exc}")
             rc = 1
@@ -346,8 +352,6 @@ def _capture_all(
     Returns per-actor capture exit codes (separate from invoke-agent rc).
     """
 
-    from cross_agent_consensus.cli import cmd_capture as _cmd_capture  # late: avoid cli<->run_macro cycle
-
     capture_rcs: dict[str, int] = {}
     for plan in plans:
         if plan.phase not in ("reviewer", "validator", "author", "manual"):
@@ -360,7 +364,7 @@ def _capture_all(
             capture_rcs[plan.actor] = 0
             continue
         rc = exit_codes.get(plan.actor, 0)
-        capture_args = argparse.Namespace(
+        capture_args = CaptureCommandInput(
             run=str(run),
             phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
             actor=plan.actor,
@@ -379,7 +383,7 @@ def _capture_all(
             no_narrative_extract=False,
         )
         try:
-            capture_rcs[plan.actor] = _cmd_capture(capture_args)
+            capture_rcs[plan.actor] = capture.cmd_capture(capture_args)
         except Exception as exc:
             eprint(f"error: capture raised for actor {plan.actor}: {exc}")
             capture_rcs[plan.actor] = 1
@@ -539,13 +543,13 @@ def _summarize_results(
     return overall
 
 
-def cmd_run(args: argparse.Namespace) -> int:
+def cmd_run(args: RunCommandInput) -> int:
     """`consensus run` macro entry point."""
 
     run = Path(args.run)
     round_id = normalize_round_id(args.round)
     phase = args.phase
-    requested = [actor.strip() for actor in args.actors.split(",")] if getattr(args, "actors", None) else None
+    requested = [actor.strip() for actor in args.actors.split(",")] if args.actors else None
 
     if phase not in ("author", "reviewer", "rereview", "validator"):
         eprint(f"error: unsupported phase: {phase}")

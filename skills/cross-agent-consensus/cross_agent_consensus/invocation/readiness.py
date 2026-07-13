@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import re
 import shlex
 import shutil
@@ -10,8 +9,8 @@ from pathlib import Path
 
 from cross_agent_consensus.io import eprint, slugify
 from cross_agent_consensus.layout import DEFAULT_LAYOUT, detect_run_layout, round_dir, round_number
-from cross_agent_consensus.models import Record
-from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
+from cross_agent_consensus.models import InvocationCommandInput, InvocationReadyInput, Record
+from cross_agent_consensus.records import first_record, parse_run_snapshot, records_by_type
 from cross_agent_consensus.validation import check_participants, check_pre_execution
 
 INVOCATION_READY_BOUNDARY_WARNING = (
@@ -91,6 +90,8 @@ def _scope_matches(scope: object, *, run_id: str, round_id: str, phase: str, act
         # Dict form: {phase: [...], actors: [...], rounds: [...], runs: [...]}
         plural_to_key = {"phases": "phase", "actors": "actor", "rounds": "round", "runs": "run"}
         for raw_key, allowed in scope.items():
+            if not isinstance(raw_key, str):
+                return False
             key = plural_to_key.get(raw_key, raw_key)
             if key not in context:
                 return False
@@ -187,13 +188,18 @@ def secret_argv_errors(command: list[str]) -> list[str]:
     return errors
 
 
-def reviewer_prompt_completeness_errors(run: Path, args: argparse.Namespace, participants: Record | None) -> list[str]:
+def reviewer_prompt_completeness_errors(
+    run: Path,
+    args: InvocationReadyInput,
+    participants: Record | None,
+    records: list[Record],
+) -> list[str]:
     if participants is None:
         return []
     reviewers = [str(value) for value in participants.data.get("reviewer_identities") or []]
     if args.actor not in reviewers:
         return []
-    batches = records_by_type(parse_run_records(run), "ReviewBatch")
+    batches = records_by_type(records, "ReviewBatch")
     active_batch = batches[-1] if batches else None
     if active_batch is None or active_batch.data.get("review_mode") != "fresh_review":
         return []
@@ -300,13 +306,14 @@ def _suggest_codex_command_with_skip(command: list[str]) -> str:
     return command_for_display(patched)
 
 
-def invocation_ready_errors(run: Path, args: argparse.Namespace, command: list[str]) -> list[str]:
-    records = parse_run_records(run)
+def invocation_ready_errors(run: Path, args: InvocationReadyInput, command: list[str]) -> list[str]:
+    snapshot = parse_run_snapshot(run)
+    records = snapshot.records
     participants = first_record(records, "Participants")
     messages: list[str] = []
     for name, result in [
-        ("pre-execution", check_pre_execution(run)),
-        ("participants", check_participants(run)),
+        ("pre-execution", check_pre_execution(run, snapshot)),
+        ("participants", check_participants(run, snapshot)),
     ]:
         if not result.ok:
             messages.extend(f"{name}: {message}" for message in result.messages)
@@ -317,7 +324,7 @@ def invocation_ready_errors(run: Path, args: argparse.Namespace, command: list[s
         known.update(str(value) for value in participants.data.get("reviewer_identities") or [])
     if args.actor not in known:
         messages.append(f"actor is not recorded as a participant: {args.actor}")
-    messages.extend(reviewer_prompt_completeness_errors(run, args, participants))
+    messages.extend(reviewer_prompt_completeness_errors(run, args, participants, records))
     prompt = Path(args.prompt)
     if not prompt.is_file():
         messages.append(f"prompt file not found: {prompt}")
@@ -344,7 +351,7 @@ def invocation_ready_errors(run: Path, args: argparse.Namespace, command: list[s
     return messages
 
 
-def invoke_agent_round_path_errors(run: Path, args: argparse.Namespace) -> list[str]:
+def invoke_agent_round_path_errors(run: Path, args: InvocationCommandInput) -> list[str]:
     messages: list[str] = []
     current_round = round_dir(run, args.round)
     prompt = Path(args.prompt)
@@ -356,7 +363,7 @@ def invoke_agent_round_path_errors(run: Path, args: argparse.Namespace) -> list[
     return messages
 
 
-def cmd_invocation_ready(args: argparse.Namespace) -> int:
+def cmd_invocation_ready(args: InvocationReadyInput) -> int:
     run = Path(args.run)
     command = runtime_command(args.command)
     messages = invocation_ready_errors(run, args, command)
@@ -374,4 +381,3 @@ def cmd_invocation_ready(args: argparse.Namespace) -> int:
     if command:
         print("command: " + command_for_display(command))
     return 0
-

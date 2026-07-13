@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.9.2] - 2026-07-13
+
+### Fixed
+- Markdown frontmatter now quotes strings that resemble booleans, nulls,
+  integers, lists, or mappings. `TaskBrief.objective: "true"` remains a string
+  after a write/read cycle, and escaped quotes now decode symmetrically.
+- Required-field placeholder detection now recognizes only a complete
+  `<placeholder>` token. Objectives containing comparison operators such as
+  `0 < retries > -1` are accepted.
+- Record parsing reports invalid UTF-8, unknown frontmatter record types, and
+  known record headings without frontmatter. Required record fields are also
+  checked against their declared string, list, mapping, boolean, integer, or
+  nullable-string type.
+
+### Changed
+- `consensus validate` parses each run into one `RunSnapshot`; all selected
+  validators reuse the same records and parser diagnostics.
+- Cross-record reference checks moved to `link_validation.py` and are grouped
+  by review batches, reviewer records, normalization, finding lifecycle,
+  decisions, and terminal records.
+- Prompt policy moved to `prompt_command.py`, capture owns `cmd_capture`, and
+  `run_macro.py` calls typed command-input dataclasses. The previous
+  `cli.py`/`run_macro.py` late-import cycle is removed.
+- Added pinned pytest/mypy development dependencies, mypy configuration, and
+  a GitHub Actions Python 3.11/3.13 quality job.
+
 ## [0.9.1] - 2026-06-04
 
 ### Added

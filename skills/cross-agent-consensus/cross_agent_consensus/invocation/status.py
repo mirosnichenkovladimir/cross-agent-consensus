@@ -137,13 +137,15 @@ def cmd_agent_status(args: argparse.Namespace) -> int:
             print(f"started_at: {payload.get('started_at')}")
             print(f"last_agent_activity_at: {payload.get('last_agent_activity_at')}")
             print(f"idle_seconds: {payload.get('idle_seconds')}")
-            exit_payload = payload.get("exit") or {}
+            raw_exit_payload = payload.get("exit")
+            exit_payload = raw_exit_payload if isinstance(raw_exit_payload, dict) else {}
             print(f"exit_code: {exit_payload.get('exit_code_or_null')}")
             print(f"stdout: {paths.stdout}")
             print(f"stderr: {paths.stderr}")
             print(f"agent_log: {paths.agent_log if paths.agent_log.exists() else None}")
             print(f"final_output: {paths.final_output if paths.final_output.exists() else None}")
-            summary = payload["summary"]
+            raw_summary = payload["summary"]
+            summary = raw_summary if isinstance(raw_summary, dict) else EMPTY_AGENT_STATUS_SUMMARY
             print(
                 f"summary: final_output_lines={summary['final_output_lines']} "
                 f"narrative_findings={summary['narrative_findings']} "

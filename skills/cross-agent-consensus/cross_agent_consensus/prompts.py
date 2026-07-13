@@ -19,6 +19,7 @@ from cross_agent_consensus.models import (
     CONCLUSION_VALIDATION_BATCH_PURPOSE,
     CONCLUSION_VALIDATION_REVIEW_MODE,
     PROPOSED_CONCLUSIONS,
+    PromptCommandInput,
     Record,
 )
 from cross_agent_consensus.records import first_record, records_by_type
@@ -114,7 +115,7 @@ def active_review_batches(records: list[Record], round_value: str | None) -> lis
     return result
 
 
-def selected_review_batch(records: list[Record], args: Any) -> Record | None:
+def selected_review_batch(records: list[Record], args: PromptCommandInput) -> Record | None:
     return select_review_batch(records, getattr(args, "round", None), getattr(args, "review_batch", None))
 
 
@@ -151,7 +152,7 @@ def resolve_active_round(
     return round_id_from_number(record_round_number(batch))
 
 
-def prompt_filename(args: Any) -> str:
+def prompt_filename(args: PromptCommandInput) -> str:
     actor = slugify(args.actor or args.phase)
     parts = [actor, args.phase]
     if args.round:
@@ -160,7 +161,11 @@ def prompt_filename(args: Any) -> str:
     return "-".join(parts) + f".{suffix}" if suffix == "md" else "-".join(parts + ["draft"]) + ".md"
 
 
-def round_first_prompt_target(run: Path, args: Any, records: list[Record] | None = None) -> Path:
+def round_first_prompt_target(
+    run: Path,
+    args: PromptCommandInput,
+    records: list[Record] | None = None,
+) -> Path:
     current_round = round_dir(run, args.round)
     actor = slugify(args.actor or args.phase)
     suffix = "-draft.md" if args.force_draft else ".md"
@@ -169,7 +174,7 @@ def round_first_prompt_target(run: Path, args: Any, records: list[Record] | None
         return current_round / "prompts" / f"{name}{suffix}"
     if args.phase == "reviewer":
         batch = selected_review_batch(records, args) if records is not None else None
-        if is_conclusion_validation_batch(batch, records):
+        if batch is not None and is_conclusion_validation_batch(batch, records):
             qualifier = slugify(str(batch.data.get("review_batch_id")))
             return current_round / "prompts" / "reviewers" / qualifier / f"{actor}{suffix}"
         return current_round / "prompts" / "reviewers" / f"{actor}{suffix}"
@@ -180,7 +185,7 @@ def round_first_prompt_target(run: Path, args: Any, records: list[Record] | None
     return current_round / "prompts" / f"{args.phase}{suffix}"
 
 
-def prompt_target(run: Path, args: Any, records: list[Record] | None = None) -> Path:
+def prompt_target(run: Path, args: PromptCommandInput, records: list[Record] | None = None) -> Path:
     if args.output:
         return Path(args.output)
     if detect_run_layout(run) == DEFAULT_LAYOUT:
@@ -250,7 +255,7 @@ def conclusion_validation_table(records: list[Record], batch: Record) -> list[st
     return rows
 
 
-def build_prompt(args: Any, records: list[Record]) -> str:
+def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
     task = first_record(records, "TaskBrief")
     policy = first_record(records, "Policy")
     scope = first_record(records, "ReviewScope")

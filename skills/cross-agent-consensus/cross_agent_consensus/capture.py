@@ -5,9 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import sys
 from pathlib import Path
-from typing import Any
 
-from cross_agent_consensus.io import append_text, atomic_write_new, sha256_file, slugify, utc_now, write_bytes_new
+from cross_agent_consensus.io import append_text, atomic_write_new, eprint, sha256_file, slugify, utc_now, write_bytes_new
 from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
     detect_run_layout,
@@ -15,10 +14,11 @@ from cross_agent_consensus.layout import (
     record_round_number,
     round_dir,
     round_id_from_number,
+    round_number,
 )
 from cross_agent_consensus.markdown_records import frontmatter, parse_records_from_file
-from cross_agent_consensus.models import FRESH_REVIEW_MODE, Record
-from cross_agent_consensus.prompts import review_batch_by_id
+from cross_agent_consensus.models import CaptureCommandInput, FRESH_REVIEW_MODE, Record
+from cross_agent_consensus.prompts import active_review_batches, resolve_active_round, review_batch_by_id
 from cross_agent_consensus.records import NARRATIVE_FINDING_ID_RE, parse_run_records, records_by_type
 
 
@@ -100,14 +100,17 @@ def reviewer_capture_exists(records: list[Record], reviewer_identity: str, revie
     return False
 
 
-def reviewer_payload_qualifier(args: Any) -> str:
+def reviewer_payload_qualifier(args: CaptureCommandInput) -> str:
     return slugify(str(args.review_batch or "review-batch"))
 
 
-def qualified_reviewer_payload_needed(run: Path, records: list[Record], args: Any) -> bool:
+def qualified_reviewer_payload_needed(run: Path, records: list[Record], args: CaptureCommandInput) -> bool:
     if getattr(args, "phase", None) != "reviewer" or not getattr(args, "review_batch", None):
         return False
-    batch = review_batch_by_id(records, args.review_batch)
+    review_batch_id = args.review_batch
+    if review_batch_id is None:
+        return False
+    batch = review_batch_by_id(records, review_batch_id)
     if batch is None:
         return False
     actor = slugify(getattr(args, "actor", None) or "reviewer")
@@ -121,7 +124,7 @@ def qualified_reviewer_payload_needed(run: Path, records: list[Record], args: An
     return any(record.data.get("review_batch_id") != args.review_batch for record in raw_records)
 
 
-def phase_record_target(run: Path, args: Any, records: list[Record] | None = None) -> Path | None:
+def phase_record_target(run: Path, args: CaptureCommandInput, records: list[Record] | None = None) -> Path | None:
     actor = slugify(args.actor or args.phase)
     if detect_run_layout(run) == DEFAULT_LAYOUT:
         current_round = round_dir(run, args.round)
@@ -143,7 +146,7 @@ def phase_record_target(run: Path, args: Any, records: list[Record] | None = Non
     return None
 
 
-def raw_payload_target_base(run: Path, args: Any, records: list[Record] | None = None) -> Path:
+def raw_payload_target_base(run: Path, args: CaptureCommandInput, records: list[Record] | None = None) -> Path:
     actor = slugify(args.actor or args.phase)
     if detect_run_layout(run) == DEFAULT_LAYOUT:
         current_round = round_dir(run, args.round)
@@ -161,7 +164,7 @@ def raw_payload_target_base(run: Path, args: Any, records: list[Record] | None =
     return run / "payloads" / "raw" / f"{stamp}-{actor}-{args.phase}.out"
 
 
-def copy_raw_payload(run: Path, args: Any, records: list[Record] | None = None) -> tuple[Path, str]:
+def copy_raw_payload(run: Path, args: CaptureCommandInput, records: list[Record] | None = None) -> tuple[Path, str]:
     target_base = raw_payload_target_base(run, args, records)
     if args.source_file:
         source = Path(args.source_file)
@@ -186,7 +189,7 @@ def copy_raw_payload(run: Path, args: Any, records: list[Record] | None = None) 
 
 def append_reviewer_capture(
     run: Path,
-    args: Any,
+    args: CaptureCommandInput,
     raw_path: Path,
     raw_sha: str,
     records: list[Record] | None = None,
@@ -260,7 +263,7 @@ def append_reviewer_capture(
     atomic_write_new(target, content)
 
 
-def append_validator_capture(run: Path, args: Any, raw_path: Path, raw_sha: str) -> None:
+def append_validator_capture(run: Path, args: CaptureCommandInput, raw_path: Path, raw_sha: str) -> None:
     if not args.validator_id or not args.artifact_version or not args.result:
         raise ValueError("validator capture requires --validator-id, --artifact-version, and --result")
     created_at = utc_now()
@@ -298,3 +301,72 @@ def append_validator_capture(run: Path, args: Any, raw_path: Path, raw_sha: str)
     )
     target = phase_record_target(run, args) or (run / "validation.md")
     append_text(target, section)
+
+
+def _resolve_existing_round(records: list[Record], explicit_round: str | None) -> str:
+    if explicit_round is None:
+        return resolve_active_round(records, explicit_round)
+    wanted = round_number(explicit_round)
+    for record in records_by_type(records, "ReviewBatch"):
+        try:
+            if round_number(str(record.data.get("round_id"))) == wanted:
+                return round_id_from_number(wanted)
+        except ValueError:
+            continue
+    raise ValueError(f"no ReviewBatch found for {round_id_from_number(wanted)}")
+
+
+def _resolve_single_candidate(flag: str, candidates: list[str], *, hint: str) -> str:
+    if len(candidates) == 1:
+        value = candidates[0]
+        print(f"using {flag} {value} ({hint})")
+        return value
+    raise ValueError(
+        f"reviewer capture requires {flag} "
+        f"(found {len(candidates)} candidates: {', '.join(candidates) or 'none'})"
+    )
+
+
+def cmd_capture(args: CaptureCommandInput) -> int:
+    run = Path(args.run)
+    try:
+        if args.phase in {"author", "manual"} and not args.no_append_record:
+            raise ValueError(f"{args.phase} capture requires --no-append-record for bare payload capture")
+        records = parse_run_records(run)
+        if args.phase == "reviewer" or args.review_batch:
+            args.round = resolve_active_round(records, args.round, args.review_batch)
+        else:
+            args.round = _resolve_existing_round(records, args.round)
+        if args.phase == "reviewer" and not args.no_append_record:
+            if not args.review_batch:
+                args.review_batch = _resolve_single_candidate(
+                    "--review-batch",
+                    active_review_batches(records, args.round),
+                    hint="only active batch",
+                )
+            if not args.artifact_version:
+                artifacts = [
+                    str(record.data.get("artifact_version_id"))
+                    for record in records_by_type(records, "ArtifactVersion")
+                    if record.data.get("artifact_version_id")
+                ]
+                args.artifact_version = _resolve_single_candidate(
+                    "--artifact-version", artifacts, hint="only ArtifactVersion"
+                )
+            reviewer_identity = args.actor or "reviewer"
+            if reviewer_capture_exists(records, reviewer_identity, args.review_batch):
+                raise ValueError(
+                    f"reviewer output already captured for {reviewer_identity} in ReviewBatch {args.review_batch}"
+                )
+        raw_path, raw_sha = copy_raw_payload(run, args, records)
+        if not args.no_append_record:
+            if args.phase == "reviewer":
+                append_reviewer_capture(run, args, raw_path, raw_sha, records=records)
+            elif args.phase == "validator":
+                append_validator_capture(run, args, raw_path, raw_sha)
+        print(f"captured raw payload: {raw_path}")
+        print(f"sha256: {raw_sha}")
+        return 0
+    except Exception as exc:
+        eprint(f"error: {exc}")
+        return 1

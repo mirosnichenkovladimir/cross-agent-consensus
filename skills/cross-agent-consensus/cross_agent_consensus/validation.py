@@ -12,10 +12,7 @@ from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
     REPORT_FILENAME,
     detect_run_layout,
-    record_path_round_number,
-    record_round_number,
     required_run_paths,
-    round_id_from_number,
 )
 from cross_agent_consensus.markdown_records import parse_records_from_file
 from cross_agent_consensus.models import (
@@ -25,18 +22,28 @@ from cross_agent_consensus.models import (
     CheckResult,
     Record,
 )
-from cross_agent_consensus.record_schema import COMMON_FIELDS, ENUMS, FIELD_ALIASES, REQUIRED_FIELDS
+from cross_agent_consensus.record_schema import (
+    COMMON_FIELDS,
+    ENUMS,
+    FIELD_ALIASES,
+    REQUIRED_FIELDS,
+    REQUIRED_FIELD_TYPES,
+    expected_type_label,
+)
 from cross_agent_consensus.records import (
+    RunSnapshot,
     canonical_finding_ids,
     first_record,
     parse_run_records,
+    parse_run_snapshot,
     records_by_type,
 )
 from cross_agent_consensus.invocation.session_paths import safe_actor_component
+from cross_agent_consensus.link_validation import collect_link_messages
 
 RESOLVING_REREVIEW_DECISIONS = {"verified", "rejection_accepted"}
 UNRESOLVED_REREVIEW_DECISIONS = {"still_valid", "disputed", "needs_human"}
-RUN_SCOPE_SENTINEL = "__run_scope__"
+PLACEHOLDER_RE = re.compile(r"^<[^<>\n]+>$")
 
 
 def required_field_missing(data: dict[str, Any], field: str) -> bool:
@@ -56,17 +63,17 @@ def required_field_missing(data: dict[str, Any], field: str) -> bool:
         return True
     if isinstance(value, dict) and not value:
         return True
-    if isinstance(value, str) and "<" in value and ">" in value:
+    if isinstance(value, str) and PLACEHOLDER_RE.fullmatch(value.strip()):
         return True
     return False
 
 
-def check_pre_execution(run: Path) -> CheckResult:
+def check_pre_execution(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
     messages: list[str] = []
     for path in required_run_paths(run):
         if not path.exists():
             messages.append(f"missing required path: {path.relative_to(run) if path.is_relative_to(run) else path}")
-    records = parse_run_records(run)
+    records = (snapshot or parse_run_snapshot(run)).records
     for record_type in ["TaskBrief", "Policy", "Participants", "ReviewScope", "ReviewBatch", "ArtifactVersion"]:
         if first_record(records, record_type) is None:
             messages.append(f"missing required record type: {record_type}")
@@ -276,11 +283,16 @@ def reviewer_cli_invocation_messages(run: Path, records: list[Record]) -> list[s
     return messages
 
 
-def check_records(run: Path) -> CheckResult:
+def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
     messages: list[str] = []
     warnings: list[str] = []
     seen_ids: set[str] = set()
-    records = parse_run_records(run)
+    snapshot = snapshot or parse_run_snapshot(run)
+    records = snapshot.records
+    messages.extend(
+        f"{diagnostic.path}:{diagnostic.heading_line}: {diagnostic.message}"
+        for diagnostic in snapshot.diagnostics
+    )
     if not records:
         messages.append("no protocol records found")
     for record in records:
@@ -301,6 +313,16 @@ def check_records(run: Path) -> CheckResult:
         for field in REQUIRED_FIELDS.get(record.record_type, []):
             if required_field_missing(record.data, field):
                 messages.append(f"{record.path}:{record.heading_line}: {record.record_type} missing field {field}")
+            else:
+                value = record.data[field]
+                expected_types = REQUIRED_FIELD_TYPES[field]
+                if not isinstance(value, expected_types) or (
+                    expected_types == (int,) and isinstance(value, bool)
+                ):
+                    messages.append(
+                        f"{record.path}:{record.heading_line}: {record.record_type}.{field} must be "
+                        f"{expected_type_label(field)}, got {type(value).__name__}"
+                    )
         unique = f"{record.record_type}:{record.record_id}"
         if unique in seen_ids:
             messages.append(f"{record.path}:{record.heading_line}: duplicate record id {unique}")
@@ -320,8 +342,8 @@ def check_records(run: Path) -> CheckResult:
     return CheckResult(ok, (warnings + messages) or ["record checks passed"])
 
 
-def check_participants(run: Path) -> CheckResult:
-    records = parse_run_records(run)
+def check_participants(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
+    records = (snapshot or parse_run_snapshot(run)).records
     participants = first_record(records, "Participants")
     if participants is None:
         return CheckResult.fail(["missing Participants record"])
@@ -339,157 +361,16 @@ def check_participants(run: Path) -> CheckResult:
     return CheckResult(not messages, messages or ["participant checks passed"])
 
 
-def check_links(run: Path) -> CheckResult:
-    records = parse_run_records(run)
-    messages: list[str] = []
-    artifacts = {record.data.get("artifact_version_id") for record in records_by_type(records, "ArtifactVersion")}
-    scopes = {record.data.get("review_scope_id") for record in records_by_type(records, "ReviewScope")}
-    batches = {record.data.get("review_batch_id") for record in records_by_type(records, "ReviewBatch")}
-    batch_rounds: dict[str, int] = {}
-    raw_findings = {record.data.get("raw_finding_id") for record in records_by_type(records, "RawFinding")}
-    normalizations = {
-        record.data.get("normalization_record_id") for record in records_by_type(records, "NormalizationRecord")
-    }
-    canonical_findings = {record.data.get("canonical_finding_id") for record in records_by_type(records, "CanonicalFinding")}
-    termination_records = {
-        record.data.get("termination_record_id") for record in records_by_type(records, "TerminationRecord")
-    }
-    validators = set(required_validators(records))
-    participants = first_record(records, "Participants")
-    reviewers = set(participants.data.get("reviewer_identities") or []) if participants else set()
-
-    for record in records_by_type(records, "ArtifactVersion"):
-        predecessor = record.data.get("predecessor_id_or_null")
-        if predecessor and predecessor not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: predecessor artifact not found: {predecessor}")
-    for record in records_by_type(records, "ReviewBatch"):
-        if record.data.get("review_scope_id") not in scopes:
-            messages.append(f"{record.path}:{record.heading_line}: review_scope_id not found")
-        if record.data.get("target_artifact_version_id") not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: target artifact not found")
-        try:
-            batch_round = record_round_number(record)
-            if record.data.get("review_batch_id"):
-                batch_rounds[str(record.data.get("review_batch_id"))] = batch_round
-            path_round = record_path_round_number(record.path)
-            if path_round is not None and path_round != batch_round:
-                messages.append(
-                    f"{record.path}:{record.heading_line}: ReviewBatch round_id "
-                    f"{round_id_from_number(batch_round)} does not match path round-{path_round:03d}"
-                )
-        except ValueError as exc:
-            messages.append(f"{record.path}:{record.heading_line}: invalid round_id: {exc}")
-
-    def check_record_batch_round(record: Record) -> None:
-        review_batch_id = record.data.get("review_batch_id")
-        if not review_batch_id:
-            return
-        batch_round = batch_rounds.get(str(review_batch_id))
-        path_round = record_path_round_number(record.path)
-        if batch_round is not None and path_round is not None and path_round != batch_round:
-            messages.append(
-                f"{record.path}:{record.heading_line}: record path round-{path_round:03d} "
-                f"does not match ReviewBatch {review_batch_id} round_id {round_id_from_number(batch_round)}"
-            )
-    for record in records_by_type(records, "RawReviewerOutput"):
-        if record.data.get("artifact_version_id") not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: artifact_version_id not found")
-        if record.data.get("review_batch_id") not in batches:
-            messages.append(f"{record.path}:{record.heading_line}: review_batch_id not found")
-        check_record_batch_round(record)
-        if reviewers and record.data.get("reviewer_identity") not in reviewers:
-            messages.append(f"{record.path}:{record.heading_line}: reviewer_identity not found in Participants")
-        for raw_id in record.data.get("raw_finding_ids") or []:
-            if raw_id not in raw_findings:
-                messages.append(f"{record.path}:{record.heading_line}: raw_finding_id not found: {raw_id}")
-    for record in records_by_type(records, "RawFinding"):
-        if record.data.get("artifact_version_id") not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: artifact_version_id not found")
-        if record.data.get("review_batch_id") not in batches:
-            messages.append(f"{record.path}:{record.heading_line}: review_batch_id not found")
-        check_record_batch_round(record)
-        if reviewers and record.data.get("reviewer_identity") not in reviewers:
-            messages.append(f"{record.path}:{record.heading_line}: reviewer_identity not found in Participants")
-    for record in records_by_type(records, "NormalizationRecord"):
-        for raw_id in record.data.get("source_raw_finding_ids") or []:
-            if raw_id not in raw_findings:
-                messages.append(f"{record.path}:{record.heading_line}: source raw finding not found: {raw_id}")
-        if record.data.get("canonical_finding_id") not in canonical_findings:
-            messages.append(f"{record.path}:{record.heading_line}: canonical_finding_id not found")
-    for record in records_by_type(records, "CanonicalFinding"):
-        if record.data.get("target_artifact_version_id") not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: target artifact not found")
-        for raw_id in record.data.get("source_raw_finding_ids") or []:
-            if raw_id not in raw_findings:
-                messages.append(f"{record.path}:{record.heading_line}: source raw finding not found: {raw_id}")
-        if record.data.get("normalization_record_id") not in normalizations:
-            messages.append(f"{record.path}:{record.heading_line}: normalization_record_id not found")
-    for record in records_by_type(records, "MaterialityChallenge"):
-        if record.data.get("canonical_finding_id") not in canonical_findings:
-            messages.append(f"{record.path}:{record.heading_line}: canonical finding not found")
-    for record in records_by_type(records, "AuthorResponse"):
-        if record.data.get("canonical_finding_id") not in canonical_findings:
-            messages.append(f"{record.path}:{record.heading_line}: canonical finding not found")
-        artifact = record.data.get("resulting_artifact_version_id_or_null")
-        if artifact and artifact not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: resulting artifact not found: {artifact}")
-    for record in records_by_type(records, "ClarificationRecord"):
-        if record.data.get("canonical_finding_id") not in canonical_findings:
-            messages.append(f"{record.path}:{record.heading_line}: canonical finding not found")
-    for record in records_by_type(records, "ReReviewDecision"):
-        if record.data.get("canonical_finding_id") not in canonical_findings:
-            messages.append(f"{record.path}:{record.heading_line}: canonical finding not found")
-        if record.data.get("review_batch_id") not in batches:
-            messages.append(f"{record.path}:{record.heading_line}: review_batch_id not found")
-        check_record_batch_round(record)
-        artifact = record.data.get("artifact_version_id_or_null")
-        if artifact and artifact not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: artifact_version_id_or_null not found")
-        if reviewers and record.data.get("reviewer_identity") not in reviewers:
-            messages.append(f"{record.path}:{record.heading_line}: reviewer_identity not found in Participants")
-    for record in records_by_type(records, "ValidationEvidence"):
-        if record.data.get("target_artifact_version_id") not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: target_artifact_version_id not found")
-    for record in records_by_type(records, "EscalationRecord"):
-        for finding_id in record.data.get("affected_finding_ids") or []:
-            if finding_id != RUN_SCOPE_SENTINEL and finding_id not in canonical_findings:
-                messages.append(f"{record.path}:{record.heading_line}: affected finding not found: {finding_id}")
-    for record in records_by_type(records, "HumanDecision"):
-        for target_id in record.data.get("affected_finding_ids_or_validator_ids") or []:
-            if target_id != RUN_SCOPE_SENTINEL and target_id not in canonical_findings and target_id not in validators:
-                messages.append(f"{record.path}:{record.heading_line}: affected finding or validator not found: {target_id}")
-    for record in records_by_type(records, "AbortRecord"):
-        artifact = record.data.get("artifact_version_id_or_null")
-        if artifact and artifact not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: artifact_version_id_or_null not found")
-        for finding_id in record.data.get("unresolved_finding_ids") or []:
-            if finding_id not in canonical_findings:
-                messages.append(f"{record.path}:{record.heading_line}: unresolved finding not found: {finding_id}")
-    for record in records_by_type(records, "TerminationRecord"):
-        artifact = record.data.get("final_artifact_version_id_or_null")
-        if artifact and artifact not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: final artifact not found: {artifact}")
-        for finding_id in record.data.get("unresolved_finding_ids") or []:
-            if finding_id not in canonical_findings:
-                messages.append(f"{record.path}:{record.heading_line}: unresolved finding not found: {finding_id}")
-    for record in records_by_type(records, "FinalReport"):
-        if record.data.get("termination_record_id") not in termination_records:
-            messages.append(f"{record.path}:{record.heading_line}: termination_record_id not found")
-        artifact = record.data.get("final_artifact_version_id_or_null")
-        if artifact and artifact not in artifacts:
-            messages.append(f"{record.path}:{record.heading_line}: final artifact not found: {artifact}")
-        for finding_id in record.data.get("unresolved_finding_ids") or []:
-            if finding_id not in canonical_findings:
-                messages.append(f"{record.path}:{record.heading_line}: unresolved finding not found: {finding_id}")
-        backlog_path = record.data.get("backlog_path")
-        if backlog_path and not (run / str(backlog_path)).exists():
-            messages.append(f"{record.path}:{record.heading_line}: backlog_path not found")
+def check_links(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
+    records = (snapshot or parse_run_snapshot(run)).records
+    messages = collect_link_messages(run, records, required_validators(records))
     return CheckResult(not messages, messages or ["link checks passed"])
 
 
-def check_reviewer_isolation(run: Path) -> CheckResult:
+def check_reviewer_isolation(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
     messages: list[str] = []
-    all_records = parse_run_records(run)
+    snapshot = snapshot or parse_run_snapshot(run)
+    all_records = snapshot.records
     batches = {str(record.data.get("review_batch_id")): record for record in records_by_type(all_records, "ReviewBatch")}
     if detect_run_layout(run) == DEFAULT_LAYOUT:
         review_files = sorted((run / "rounds").glob("round-*/reviews/*.md")) if (run / "rounds").exists() else []
@@ -511,7 +392,11 @@ def check_reviewer_isolation(run: Path) -> CheckResult:
                 continue
             round_id = f"round-{match.group('round')}"
             reviewer = match.group("reviewer")
-        raw_records = records_by_type(parse_records_from_file(path), "RawReviewerOutput")
+        raw_records = [
+            record
+            for record in snapshot.by_type.get("RawReviewerOutput", [])
+            if record.path == path
+        ]
         if not raw_records:
             messages.append(f"{path}: missing RawReviewerOutput record")
             continue
@@ -668,9 +553,13 @@ def terminal_records(run: Path) -> tuple[Record | None, Record | None]:
     return first_record(records, "TerminationRecord"), first_record(records, "FinalReport")
 
 
-def check_terminal(run: Path) -> CheckResult:
-    records = parse_run_records(run)
-    termination, final_report = terminal_records(run)
+def check_terminal(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
+    snapshot = snapshot or parse_run_snapshot(run)
+    records = snapshot.records
+    report_path = run / REPORT_FILENAME
+    report_records = [record for record in records if record.path == report_path]
+    termination = first_record(report_records, "TerminationRecord")
+    final_report = first_record(report_records, "FinalReport")
     return check_terminal_records(run, records, termination, final_report)
 
 

@@ -31,6 +31,19 @@ class Record:
     data: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RecordParseDiagnostic:
+    path: Path
+    heading_line: int
+    message: str
+
+
+@dataclass
+class ParsedRecordFile:
+    records: list[Record]
+    diagnostics: list[RecordParseDiagnostic]
+
+
 @dataclass
 class CheckResult:
     ok: bool
@@ -107,3 +120,73 @@ class AgentSessionPaths:
     state: Path
     exit: Path
     final_output: Path
+
+
+@dataclass
+class PromptCommandInput:
+    run: str
+    phase: str
+    actor: str | None
+    artifact_version: str | None
+    round: str | None
+    review_batch: str | None
+    output: str | None
+    force_draft: bool
+    dry_run: bool
+
+
+@dataclass
+class CaptureCommandInput:
+    run: str
+    phase: str
+    actor: str | None
+    review_batch: str | None
+    artifact_version: str | None
+    source_file: str | None
+    source_mode: str
+    source_command: str | None
+    provider: str | None
+    round: str | None
+    validator_id: str | None
+    result: str | None
+    waiver_authority: str | None
+    waiver_rationale: str | None
+    no_append_record: bool
+    no_narrative_extract: bool
+
+
+@dataclass
+class InvocationReadyInput:
+    run: str
+    actor: str
+    player: str
+    prompt: str
+    raw_output: str
+    approved: bool
+    command: list[str] | None
+
+
+@dataclass
+class InvocationCommandInput(InvocationReadyInput):
+    round: str
+    phase: str
+    cwd: str
+    idle_timeout_seconds: float
+    stale_timeout_seconds: float
+    heartbeat_interval_seconds: float
+
+
+@dataclass
+class RunCommandInput:
+    run: str
+    round: str
+    phase: str
+    actors: str | None
+    execute_reviewers: bool
+    approved: bool
+    sequential: bool
+    cwd: str
+    idle_timeout_seconds: float
+    stale_timeout_seconds: float
+    heartbeat_interval_seconds: float
+    operator_identity: str | None

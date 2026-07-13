@@ -10,11 +10,28 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "skills" / "cross-agent-consensus"
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from cross_agent_consensus.markdown_records import frontmatter, parse_records_from_file, parse_yaml_subset
+from cross_agent_consensus.markdown_records import (
+    frontmatter,
+    parse_records_from_file,
+    parse_records_with_diagnostics,
+    parse_yaml_subset,
+    render_yaml,
+)
 from cross_agent_consensus.records import is_protocol_payload_path
 
 
 class MarkdownRecordTests(unittest.TestCase):
+    def test_rendered_yaml_preserves_ambiguous_strings(self) -> None:
+        values = {
+            "boolean_text": "true",
+            "null_text": "null",
+            "integer_text": "123",
+            "quoted_text": 'value: "quoted"',
+            "items": ["true", "null", "123"],
+        }
+
+        self.assertEqual(parse_yaml_subset(render_yaml(values)), values)
+
     def test_yaml_subset_parses_scalars_lists_and_mappings(self) -> None:
         data = parse_yaml_subset(
             "\n".join(
@@ -193,6 +210,29 @@ class MarkdownRecordTests(unittest.TestCase):
 
         record_types = sorted(record.record_type for record in records)
         self.assertEqual(record_types, ["Participants", "TaskBrief"])
+
+    def test_record_parser_reports_unknown_frontmatter_record_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            path = Path(tmp_name) / "run.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## TaskBrieff task-001",
+                        "---",
+                        "record_type: TaskBrieff",
+                        "schema_version: m2-markdown-1",
+                        "---",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = parse_records_with_diagnostics(path)
+
+        self.assertEqual(parsed.records, [])
+        self.assertEqual(len(parsed.diagnostics), 1)
+        self.assertIn("unknown record type TaskBrieff", parsed.diagnostics[0].message)
 
     def test_field_aliases_rewrite_raw_finding_keys(self) -> None:
         """RawFinding `suggested_fix` should map to `suggested_fix_or_null` and `severity` to claim."""

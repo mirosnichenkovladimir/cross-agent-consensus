@@ -26,6 +26,7 @@ class ValidationTests(unittest.TestCase):
         self.assertFalse(required_field_missing({"value_or_null": None}, "value_or_null"))
         self.assertTrue(required_field_missing({"value": None}, "value"))
         self.assertTrue(required_field_missing({"value": "<placeholder>"}, "value"))
+        self.assertFalse(required_field_missing({"value": "Require 0 < retries > -1"}, "value"))
 
     def test_validator_status_uses_latest_seen_result(self) -> None:
         records = [
@@ -153,6 +154,43 @@ class ValidationTests(unittest.TestCase):
         self.assertTrue(
             any("RawFinding.suggested_fix -> suggested_fix_or_null" in msg for msg in deprecation_lines),
             f"suggested_fix deprecation missing from {deprecation_lines!r}",
+        )
+
+    def test_check_records_rejects_wrong_required_field_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name) / "sample"
+            run.mkdir()
+            (run / "run.md").write_text(
+                "\n".join(
+                    [
+                        "## TaskBrief task-001",
+                        frontmatter(
+                            {
+                                "record_type": "TaskBrief",
+                                "schema_version": "m2-markdown-1",
+                                "run_id": "sample",
+                                "actor_identity": "orchestrator",
+                                "created_at": "2026-06-01T00:00:00Z",
+                                "task_brief_id": "task-001",
+                                "artifact_locator": "README.md",
+                                "objective": True,
+                                "success_criteria": ["pass"],
+                                "profile": "document-consensus",
+                                "human_supervisor_identity_or_null": None,
+                            }
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = check_records(run)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any("TaskBrief.objective must be str, got bool" in message for message in result.messages),
+            result.messages,
         )
 
 

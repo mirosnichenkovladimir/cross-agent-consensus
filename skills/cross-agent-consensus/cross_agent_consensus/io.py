@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,7 @@ def read_cac_version() -> str:
 
 
 def eprint(message: str) -> None:
-    print(message, file=os.sys.stderr)
+    print(message, file=sys.stderr)
 
 
 def slugify(value: str, default: str = "artifact") -> str:
@@ -141,22 +142,29 @@ def compact_json_value(value: Any, *, max_string: int = 2000, max_items: int = 5
             return value[:max_string] + "...<truncated>"
         return value
     if isinstance(value, list):
-        result = [compact_json_value(item, max_string=max_string, max_items=max_items) for item in value[:max_items]]
+        compacted_list = [
+            compact_json_value(item, max_string=max_string, max_items=max_items)
+            for item in value[:max_items]
+        ]
         if len(value) > max_items:
-            result.append({"truncated_items": len(value) - max_items})
-        return result
+            compacted_list.append({"truncated_items": len(value) - max_items})
+        return compacted_list
     if isinstance(value, dict):
         items = list(value.items())
-        result = {}
+        compacted_mapping: dict[str, Any] = {}
         for key, item in items[:max_items]:
             key_text = str(key)
             if key_text.lower() in {"thinking", "signature"}:
-                result[key_text] = "<redacted>"
+                compacted_mapping[key_text] = "<redacted>"
             else:
-                result[key_text] = compact_json_value(item, max_string=max_string, max_items=max_items)
+                compacted_mapping[key_text] = compact_json_value(
+                    item,
+                    max_string=max_string,
+                    max_items=max_items,
+                )
         if len(items) > max_items:
-            result["truncated_keys"] = len(items) - max_items
-        return result
+            compacted_mapping["truncated_keys"] = len(items) - max_items
+        return compacted_mapping
     return value
 
 

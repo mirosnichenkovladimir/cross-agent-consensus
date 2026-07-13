@@ -11,10 +11,16 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cross_agent_consensus.io import append_jsonl, atomic_write_new, eprint, read_json_file, utc_now, write_bytes_new
-from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths, CommandSpec
+from cross_agent_consensus.models import (
+    AgentInvocation,
+    AgentSessionPaths,
+    CommandSpec,
+    InvocationCommandInput,
+    InvocationReadyInput,
+)
 
 from .adapters import GenericCliPlayer, ManualPlayer, get_player_adapter
 from .readiness import (
@@ -110,7 +116,7 @@ def classify_live_agent_state(last_activity_monotonic: float, invocation: AgentI
     return "running"
 
 
-def build_agent_invocation(args: argparse.Namespace, paths: AgentSessionPaths, command: list[str]) -> AgentInvocation:
+def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPaths, command: list[str]) -> AgentInvocation:
     round_id = padded_round_id(args.round)
     prompt_path = Path(args.prompt)
     raw_output_path = Path(args.raw_output)
@@ -141,7 +147,7 @@ def copy_prompt_for_session(paths: AgentSessionPaths, prompt: Path) -> None:
         write_bytes_new(paths.prompt, data)
 
 
-def prepare_agent_session(args: argparse.Namespace, command: list[str]) -> tuple[AgentInvocation, AgentSessionPaths, CommandSpec]:
+def prepare_agent_session(args: InvocationCommandInput, command: list[str]) -> tuple[AgentInvocation, AgentSessionPaths, CommandSpec]:
     run = Path(args.run)
     paths = allocate_agent_session(run, args.round, args.actor)
     invocation = build_agent_invocation(args, paths, command)
@@ -182,7 +188,11 @@ def prepare_agent_session(args: argparse.Namespace, command: list[str]) -> tuple
     return invocation, paths, command_spec
 
 
-def prepare_rejected_agent_session(args: argparse.Namespace, command: list[str], reason: str) -> tuple[AgentInvocation, AgentSessionPaths]:
+def prepare_rejected_agent_session(
+    args: InvocationCommandInput,
+    command: list[str],
+    reason: str,
+) -> tuple[AgentInvocation, AgentSessionPaths]:
     run = Path(args.run)
     paths = allocate_agent_session(run, args.round, args.actor)
     invocation = build_agent_invocation(args, paths, command)
@@ -198,6 +208,8 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
     started_at: str | None = None
     proc: subprocess.Popen[bytes] | None = None
     adapter = get_player_adapter(invocation.player_id)
+    if not isinstance(adapter, GenericCliPlayer):
+        raise TypeError(f"player {invocation.player_id} cannot run as a monitored CLI")
     stream_buffers = {"stdout": "", "stderr": ""}
     agent_log_buffers = {"stdout": "", "stderr": ""}
     try:
@@ -257,7 +269,7 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                 timeout = max(0.05, min(0.2, next_heartbeat - time.monotonic()))
                 for key, _ in selector.select(timeout):
                     stream_name = str(key.data)
-                    stream = key.fileobj
+                    stream = cast(Any, key.fileobj)
                     data = stream.read1(65536)
                     if data:
                         target = stdout_fh if stream_name == "stdout" else stderr_fh
@@ -373,7 +385,7 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
         return 1
 
 
-def cmd_invoke_agent(args: argparse.Namespace) -> int:
+def cmd_invoke_agent(args: InvocationCommandInput) -> int:
     run = Path(args.run)
     command = runtime_command(args.command)
     try:
@@ -417,7 +429,8 @@ def cmd_invoke_agent(args: argparse.Namespace) -> int:
                 idle_seconds=0.0,
             )
             return 0
-        readiness_args = argparse.Namespace(
+        readiness_args = InvocationReadyInput(
+            run=str(run),
             actor=args.actor,
             player=args.player,
             prompt=args.prompt,
@@ -491,12 +504,13 @@ def cmd_agent_cancel(args: argparse.Namespace) -> int:
             except PermissionError:
                 os.kill(pid_int, signal.SIGTERM)
             time.sleep(max(0.0, args.grace_seconds))
+            current_pgid_after_term: int | None
             try:
-                current_pgid = os.getpgid(pid_int)
+                current_pgid_after_term = os.getpgid(pid_int)
             except ProcessLookupError:
-                current_pgid = None
-            if current_pgid is not None:
-                if current_pgid != pgid_int:
+                current_pgid_after_term = None
+            if current_pgid_after_term is not None:
+                if current_pgid_after_term != pgid_int:
                     append_agent_event(
                         paths,
                         invocation,
@@ -538,4 +552,3 @@ def cmd_agent_cancel(args: argparse.Namespace) -> int:
     except Exception as exc:
         eprint(f"error: {exc}")
         return 1
-

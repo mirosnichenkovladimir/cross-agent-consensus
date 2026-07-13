@@ -455,15 +455,21 @@ def resolve_config(
                 sources.append(source_record("project", project_path, False, {}, "from --config"))
                 errors.append(f"project: --config path not found: {project_path}")
         else:
-            project_path, reason = find_project_config(cwd)
-            if project_path is None:
+            discovered_project_path, reason = find_project_config(cwd)
+            if discovered_project_path is None:
                 sources.append(source_record("project", None, False, {}, reason))
             else:
                 try:
-                    add_layer("project", project_path, load_yaml_mapping(project_path), present=True, persistent=True)
+                    add_layer(
+                        "project",
+                        discovered_project_path,
+                        load_yaml_mapping(discovered_project_path),
+                        present=True,
+                        persistent=True,
+                    )
                 except Exception as exc:
-                    sources.append(source_record("project", project_path, True, {}))
-                    errors.append(f"project: failed to load {project_path}: {exc}")
+                    sources.append(source_record("project", discovered_project_path, True, {}))
+                    errors.append(f"project: failed to load {discovered_project_path}: {exc}")
 
     if task_file:
         task_path = Path(task_file).expanduser()
@@ -478,7 +484,8 @@ def resolve_config(
                 task_data = raw_task
                 sources.append(source_record("task_file", task_path, True, raw_task))
                 if not no_config:
-                    task_config = raw_task.get("config") if isinstance(raw_task.get("config"), dict) else {}
+                    raw_task_config = raw_task.get("config")
+                    task_config: dict[str, Any] = raw_task_config if isinstance(raw_task_config, dict) else {}
                     config = {"schema_version": CONFIG_SCHEMA_VERSION, **canonical_config(task_config)}
                     effective = deep_merge_config(effective, {key: value for key, value in config.items() if key != "schema_version"})
                     for field in flatten_values({key: value for key, value in config.items() if key != "schema_version"}):
@@ -596,8 +603,10 @@ def apply_config_to_init_args(args: argparse.Namespace, resolution: ConfigResolu
         args.reviewer = reviewers if isinstance(reviewers, list) else None
     if args.human_supervisor is None:
         args.human_supervisor = participants.get("human_supervisor", "none")
-    invocation = effective.get("invocation", {}) if isinstance(effective.get("invocation"), dict) else {}
-    unattended = invocation.get("unattended_invocation") if isinstance(invocation.get("unattended_invocation"), dict) else {}
+    raw_invocation = effective.get("invocation")
+    invocation: dict[str, Any] = raw_invocation if isinstance(raw_invocation, dict) else {}
+    raw_unattended = invocation.get("unattended_invocation")
+    unattended: dict[str, Any] = raw_unattended if isinstance(raw_unattended, dict) else {}
     if not args.unattended_invocation and unattended.get("enabled") is True:
         args.unattended_invocation = True
         scope = unattended.get("scope")

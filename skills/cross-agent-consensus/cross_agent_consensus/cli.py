@@ -38,17 +38,19 @@ from cross_agent_consensus.config import (
     resolve_config,
     validate_config_shape,
 )
-from cross_agent_consensus.capture import (
-    append_reviewer_capture,
-    append_validator_capture,
-    copy_raw_payload,
-    reviewer_capture_exists,
+from cross_agent_consensus.capture import cmd_capture
+from cross_agent_consensus.prompt_command import (
+    check_rereview_record_gate,
+    cmd_prompt,
+    print_rereview_blockers,
+    rereview_finding_ids,
 )
 from cross_agent_consensus.models import (
     CONCLUSION_VALIDATION_BATCH_PURPOSE,
     CONCLUSION_VALIDATION_REVIEW_MODE,
     CheckResult,
     ConfigResolution,
+    PromptCommandInput,
 )
 from cross_agent_consensus.markdown_records import (
     frontmatter,
@@ -68,10 +70,10 @@ from cross_agent_consensus.records import (
     canonical_finding_ids,
     first_record,
     parse_run_records,
+    parse_run_snapshot,
     records_by_type,
 )
 from cross_agent_consensus.prompts import (
-    active_review_batches,
     build_prompt,
     prompt_target,
     review_batch_by_id,
@@ -206,6 +208,7 @@ def print_check(name: str, result: CheckResult) -> None:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     run = Path(args.run)
+    snapshot = parse_run_snapshot(run)
     checks: list[tuple[str, CheckResult]] = []
     run_all = not any(
         [
@@ -218,17 +221,17 @@ def cmd_validate(args: argparse.Namespace) -> int:
         ]
     )
     if args.pre_execution or run_all:
-        checks.append(("pre-execution", check_pre_execution(run)))
+        checks.append(("pre-execution", check_pre_execution(run, snapshot)))
     if args.records or run_all:
-        checks.append(("records", check_records(run)))
+        checks.append(("records", check_records(run, snapshot)))
     if args.participants or run_all:
-        checks.append(("participants", check_participants(run)))
+        checks.append(("participants", check_participants(run, snapshot)))
     if args.links or run_all:
-        checks.append(("links", check_links(run)))
+        checks.append(("links", check_links(run, snapshot)))
     if args.reviewer_isolation or run_all:
-        checks.append(("reviewer-isolation", check_reviewer_isolation(run)))
+        checks.append(("reviewer-isolation", check_reviewer_isolation(run, snapshot)))
     if args.terminal:
-        checks.append(("terminal", check_terminal(run)))
+        checks.append(("terminal", check_terminal(run, snapshot)))
     for name, result in checks:
         print_check(name, result)
     return 0 if all(result.ok for _, result in checks) else 2
@@ -478,227 +481,6 @@ def cmd_config_setup(args: argparse.Namespace) -> int:
         for message in warnings:
             print(f"  - {message}")
     return 0
-
-
-def rereview_finding_ids(
-    records: list[Any],
-    review_batch: Any | None,
-    explicit_finding_ids: list[str],
-) -> list[str]:
-    if explicit_finding_ids:
-        return [str(finding_id) for finding_id in explicit_finding_ids]
-    if review_batch is not None:
-        source_finding_ids = review_batch.data.get("source_finding_ids")
-        if isinstance(source_finding_ids, list) and source_finding_ids:
-            return [str(finding_id) for finding_id in source_finding_ids]
-    return [
-        str(record.data.get("canonical_finding_id"))
-        for record in records_by_type(records, "CanonicalFinding")
-        if record.data.get("canonical_finding_id")
-    ]
-
-
-def remediation_blocker_message(blocker: tuple[str, str | None, int, str, int]) -> str:
-    finding_id, reviewer, attempts, latest_decision, max_attempts = blocker
-    reviewer_part = f" reviewer={reviewer}" if reviewer else ""
-    if latest_decision == "needs_human":
-        return (
-            f"finding {finding_id}{reviewer_part} already has needs_human re-review decision; "
-            "record HumanDecision before any further re-review"
-        )
-    if latest_decision == "no_attempts_allowed":
-        return (
-            f"finding {finding_id}{reviewer_part} cannot be re-reviewed because "
-            "max_remediation_rounds_per_finding is 0"
-        )
-    return (
-        f"finding {finding_id}{reviewer_part} reached max_remediation_rounds_per_finding="
-        f"{max_attempts} with latest decision={latest_decision} after {attempts} attempt(s)"
-    )
-
-
-def requested_escalation_authority(records: list[Any]) -> str:
-    participants = first_record(records, "Participants")
-    if participants is not None:
-        value = participants.data.get("human_supervisor_identity_or_null")
-        if value and value != "none":
-            return str(value)
-    task = first_record(records, "TaskBrief")
-    if task is not None:
-        value = task.data.get("human_supervisor_identity_or_null")
-        if value and value != "none":
-            return str(value)
-    return "human_supervisor_or_policy"
-
-
-def append_remediation_cap_escalation(
-    run: Path,
-    records: list[Any],
-    blockers: list[tuple[str, str | None, int, str, int]],
-    actor: str | None,
-) -> tuple[Path, bool]:
-    affected_finding_ids: list[str] = []
-    for finding_id, _, _, _, _ in blockers:
-        if finding_id not in affected_finding_ids:
-            affected_finding_ids.append(finding_id)
-    for record in records_by_type(records, "EscalationRecord"):
-        reason = str(record.data.get("reason") or "")
-        existing = [str(value) for value in record.data.get("affected_finding_ids") or []]
-        if reason.startswith("remediation cap reached") and all(
-            finding_id in existing for finding_id in affected_finding_ids
-        ):
-            return record.path, False
-
-    path = run / "escalations.md"
-    if not path.exists():
-        atomic_write_new(path, "# Escalations And Human Decisions\n")
-    next_index = len(records_by_type(records, "EscalationRecord")) + 1
-    escalation_id = f"escalation-{next_index:03d}"
-    reason = "remediation cap reached for unresolved re-review finding(s): " + ", ".join(affected_finding_ids)
-    body = "\n".join(
-        [
-            "",
-            f"## EscalationRecord {escalation_id}",
-            frontmatter(
-                {
-                    "record_type": "EscalationRecord",
-                    "schema_version": "m2-markdown-1",
-                    "run_id": run.name,
-                    "actor_identity": actor or "orchestrator-consensus-tool",
-                    "created_at": utc_now(),
-                    "escalation_record_id": escalation_id,
-                    "affected_finding_ids": affected_finding_ids,
-                    "reason": reason,
-                    "requested_authority": requested_escalation_authority(records),
-                }
-            ),
-            "",
-            "### Escalation Notes",
-            "",
-            "- Requested decision: terminate_escalated_to_human, require_revision, or revise policy.",
-            "- Current blocking state: " + "; ".join(remediation_blocker_message(blocker) for blocker in blockers),
-            "",
-        ]
-    )
-    append_text(path, body)
-    return path, True
-
-
-def print_rereview_blockers(
-    run: Path,
-    records: list[Any],
-    blockers: list[tuple[str, str | None, int, str, int]],
-    actor: str | None,
-) -> None:
-    path, created = append_remediation_cap_escalation(run, records, blockers, actor)
-    for blocker in blockers:
-        eprint(f"error: {remediation_blocker_message(blocker)}")
-    action = "wrote" if created else "existing"
-    eprint(f"error: {action} EscalationRecord: {path}")
-    eprint("error: stop re-review; record HumanDecision and terminate with terminal_condition=escalated_to_human")
-
-
-def check_rereview_record_gate(run: Path) -> bool:
-    for name, result in [("records", check_records(run)), ("links", check_links(run))]:
-        if not result.ok:
-            print_check(name, result)
-            return False
-    return True
-
-
-def cmd_prompt(args: argparse.Namespace) -> int:
-    run = Path(args.run)
-    pre = check_pre_execution(run)
-    if not pre.ok and not args.force_draft:
-        print_check("pre-execution", pre)
-        return 2
-    records = parse_run_records(run)
-    try:
-        args.round = resolve_active_round(records, args.round, args.review_batch)
-        if args.phase == "rereview":
-            if not check_rereview_record_gate(run):
-                return 2
-            review_batch = select_review_batch(records, args.round, args.review_batch)
-            findings = rereview_finding_ids(records, review_batch, [])
-            blockers = remediation_cap_blockers(records, findings, args.actor)
-            if blockers:
-                print_rereview_blockers(run, records, blockers, args.actor)
-                return 2
-        prompt = build_prompt(args, records)
-        output = prompt_target(run, args, records)
-        if args.force_draft and "draft" not in output.name:
-            output = output.with_name(output.stem + "-draft" + output.suffix)
-        if args.dry_run:
-            status = "would overwrite" if output.exists() else "would write"
-            print(f"{status} prompt: {output}")
-            print(f"prompt bytes: {len(prompt.encode('utf-8'))}")
-            if not pre.ok:
-                print("warning: would be a draft because pre-execution validation failed")
-            return 0
-        atomic_write_new(output, prompt)
-    except (FileExistsError, ValueError) as exc:
-        eprint(f"error: {exc}")
-        return 1
-    print(f"wrote prompt: {output}")
-    if not pre.ok:
-        print("warning: prompt is a draft because pre-execution validation failed")
-    return 0
-
-
-def _resolve_single_candidate(flag: str, candidates: list[str], *, hint: str) -> str:
-    if len(candidates) == 1:
-        value = candidates[0]
-        print(f"using {flag} {value} ({hint})")
-        return value
-    raise ValueError(
-        f"reviewer capture requires {flag} "
-        f"(found {len(candidates)} candidates: {', '.join(candidates) or 'none'})"
-    )
-
-
-def cmd_capture(args: argparse.Namespace) -> int:
-    run = Path(args.run)
-    try:
-        if args.phase in {"author", "manual"} and not args.no_append_record:
-            raise ValueError(f"{args.phase} capture requires --no-append-record for bare payload capture")
-        records = parse_run_records(run)
-        if args.phase == "reviewer" or args.review_batch:
-            args.round = resolve_active_round(records, args.round, args.review_batch)
-        else:
-            args.round = resolve_existing_round(records, args.round)
-        if args.phase == "reviewer" and not args.no_append_record:
-            if not args.review_batch:
-                args.review_batch = _resolve_single_candidate(
-                    "--review-batch",
-                    active_review_batches(records, args.round),
-                    hint="only active batch",
-                )
-            if not args.artifact_version:
-                artifacts = [
-                    str(record.data.get("artifact_version_id"))
-                    for record in records_by_type(records, "ArtifactVersion")
-                    if record.data.get("artifact_version_id")
-                ]
-                args.artifact_version = _resolve_single_candidate(
-                    "--artifact-version", artifacts, hint="only ArtifactVersion"
-                )
-            reviewer_identity = args.actor or "reviewer"
-            if reviewer_capture_exists(records, reviewer_identity, args.review_batch):
-                raise ValueError(
-                    f"reviewer output already captured for {reviewer_identity} in ReviewBatch {args.review_batch}"
-                )
-        raw_path, raw_sha = copy_raw_payload(run, args, records)
-        if not args.no_append_record:
-            if args.phase == "reviewer":
-                append_reviewer_capture(run, args, raw_path, raw_sha, records=records)
-            elif args.phase == "validator":
-                append_validator_capture(run, args, raw_path, raw_sha)
-        print(f"captured raw payload: {raw_path}")
-        print(f"sha256: {raw_sha}")
-        return 0
-    except Exception as exc:
-        eprint(f"error: {exc}")
-        return 1
 
 
 def cmd_new_artifact(args: argparse.Namespace) -> int:
@@ -976,7 +758,7 @@ def cmd_conclusion_validation(args: argparse.Namespace) -> int:
             if not expected_reviewers:
                 raise ValueError("--reviewer is required when Participants has no reviewer_identities")
             for reviewer in expected_reviewers:
-                prompt_args = argparse.Namespace(
+                prompt_args = PromptCommandInput(
                     run=args.run,
                     phase="reviewer",
                     actor=reviewer,
@@ -985,6 +767,7 @@ def cmd_conclusion_validation(args: argparse.Namespace) -> int:
                     review_batch=batch_id,
                     output=None,
                     force_draft=False,
+                    dry_run=False,
                 )
                 prompt = build_prompt(prompt_args, prompt_records)
                 target = prompt_target(run, prompt_args, prompt_records)

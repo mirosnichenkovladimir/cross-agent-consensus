@@ -10,7 +10,7 @@
     },
     {
       "path": "VERSION",
-      "sha256": "179a5390966e85c2071a87c1b31de13df67460665196f6529f8c4986842f81e5"
+      "sha256": "f34248c2449a022d41c918d1e995ad85859a1e9f0e6f89d0af23ae4a55519f71"
     },
     {
       "path": "config/defaults.yaml",
@@ -23,11 +23,11 @@
     },
     {
       "path": "cross_agent_consensus/capture.py",
-      "sha256": "73a6c5f8a43fa656a1eb1dca214591e392c00643769ad4cd019528a0437ceb3b"
+      "sha256": "edae7240901c04353c5460435915f39fb578e298e9c5f0e38a5d5f08d01e01b9"
     },
     {
       "path": "cross_agent_consensus/config.py",
-      "sha256": "b804d86d73049a6dd0153459d9a4e08666d3966cad763eab0b52d539a67caa30"
+      "sha256": "c94f572a347f514d5a1f6c021ad3d7ed703edcc797e99a009eb7c4051f569cb6"
     },
     {
       "path": "cross_agent_consensus/__init__.py",
@@ -48,11 +48,11 @@
     },
     {
       "path": "cross_agent_consensus/invocation/process_monitor.py",
-      "sha256": "d1f6b0be1be782e8c8e566d153f61c247eb4e10838308bac530097db1c80a6e5"
+      "sha256": "9ca5dd9bf945c6d7f803808bab92eb0ad253327464ede97395427d3f6b148c14"
     },
     {
       "path": "cross_agent_consensus/invocation/readiness.py",
-      "sha256": "12f014239829dbcff8d52ff02421caacecedd95c3ae9d698142b4a2ac722c2e5"
+      "sha256": "59f056f164b2584de79b880b3750e710c5e3f4f0d76f08051920ee29a8855ee2"
     },
     {
       "path": "cross_agent_consensus/invocation/selftest.py",
@@ -64,7 +64,7 @@
     },
     {
       "path": "cross_agent_consensus/invocation/status.py",
-      "sha256": "8715d63b365513cc421a0982c13f65b1dea7e04ccdbb1d02c006444473e766ce"
+      "sha256": "cbf7b4c9d7ab87d36483ace43e870ba78b04006498ef50686a3a26aee0e822db"
     },
     {
       "path": "cross_agent_consensus/invocation/telemetry.py",
@@ -72,8 +72,8 @@
     },
     {
       "path": "cross_agent_consensus/cli.py",
-      "sha256": "1630446811b187256e5f53f0266bc58e76c4e87d42415bc879439207926eab99",
-      "bytes": 59667
+      "sha256": "f3bb7ce9484172b8a9640db7abd5c1a8d3a7da80ff2e0f0e0a34df126f702d8f",
+      "bytes": 50531
     },
     {
       "path": "cross_agent_consensus/normalize.py",
@@ -87,7 +87,7 @@
     },
     {
       "path": "cross_agent_consensus/io.py",
-      "sha256": "f7d58ff221fa1ee4e08febfbb9a8fa1c7cc57bca5f6f52141206dcb6cec5bcf5"
+      "sha256": "59ed02c206d3a157aa0efaebf8bfea079b76bc0f9c366c6831f8c2425d30bbce"
     },
     {
       "path": "cross_agent_consensus/init.py",
@@ -98,28 +98,36 @@
       "sha256": "b955ea6f88a793f9bb99cfc0e2a36ca3393b4094ba04b668b890ec1c7a094242"
     },
     {
+      "path": "cross_agent_consensus/link_validation.py",
+      "sha256": "a0f052594ab584160b2be67af7083e9bbec335fe5655135f69d782593eb1c274"
+    },
+    {
       "path": "cross_agent_consensus/markdown_records.py",
-      "sha256": "e5c4a603aba538a8a541092b1fd9b52b7c57cf595905b694e0e579d74f424992"
+      "sha256": "2e6eddfd2b17c11510b52a625b5d193ff19ba261a7a6badad3c9cfe144ab7a11"
     },
     {
       "path": "cross_agent_consensus/models.py",
-      "sha256": "d1e787f2c44a3241694ffafc85493dd261ce4af4905644d7861a8a97756c34c2"
+      "sha256": "5c652692b5543722cb34ae58694414a94a21bddc751c5efd1b6b29727203e1e4"
+    },
+    {
+      "path": "cross_agent_consensus/prompt_command.py",
+      "sha256": "6251effd69a5809d439d102da81f5da297cb061fc2d3e4c18560453c0c76985f"
     },
     {
       "path": "cross_agent_consensus/prompts.py",
-      "sha256": "9aac6191f3bea81dab85eebba093d476e83adb1f1789b76e04dbbe876cea844a"
+      "sha256": "ee302ce3c38e6f6902738915522a720f8fa292c8a1f8d53c151d0ae150dbe2ed"
     },
     {
       "path": "cross_agent_consensus/record_schema.py",
-      "sha256": "ae4bf57a5b05aaf80418e712839475516684c771f694b29ba70e3c5736b6cc70"
+      "sha256": "a443502aa278e9c7e3602a776ce67fe624cfb8ee623bdfa91447da851d9a6b76"
     },
     {
       "path": "cross_agent_consensus/records.py",
-      "sha256": "d709e8935f361ed6d322dfd8caec4bd5454e774f913e68a108caa0f427ff5cf6"
+      "sha256": "064075302dad94e44ab6b97b477e78ba505e94a02b76e369a1666061c8cb1062"
     },
     {
       "path": "cross_agent_consensus/run_macro.py",
-      "sha256": "7cc081c8a05dfda306d93efd9334c8499322f861094825bf21c16042e13a6eb0"
+      "sha256": "5aafb9f9ee6d3e283bf5c982f9c6618f38b8fdad3a6ddcb66d7d21257389fa27"
     },
     {
       "path": "cross_agent_consensus/run_store.py",
@@ -131,7 +139,7 @@
     },
     {
       "path": "cross_agent_consensus/validation.py",
-      "sha256": "8ccf11a09b2fd8b4e578021e08c125cf34b0e790024f28d959b0591ab8d8fd72"
+      "sha256": "be024f95d5946ea836b400cc2ca817ea0974423c5b91b1f8168286efbf4a0761"
     },
     {
       "path": "references/protocol-checklist.md",
