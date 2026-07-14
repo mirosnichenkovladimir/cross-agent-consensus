@@ -193,3 +193,41 @@ second attempt cannot reserve that predecessor. `provider_session_captured`
 must consume the matching reservation before the execution attempt receives a
 terminal observation. Any RunJournal integrity diagnostic blocks resume argv
 construction.
+
+## Content-only draft promotion
+
+Participant output intended for CAC protocol records uses one JSON object with
+`kind` equal to `author_artifact`, `reviewer_findings`, `validator_output`, or
+`synthesis`. The object contains only authored claims, prose, classifications,
+or validation verdicts. It must not contain protocol IDs, participant IDs,
+timestamps, hashes, or provenance.
+
+```text
+scripts/consensus promote-draft \
+  --run <run> --round round-1 --actor reviewer-codex \
+  --artifact-version v1 --review-batch <batch-id> \
+  --source-file <completed-session-final-output>
+```
+
+The command checks completed-session evidence by default, copies the exact
+source JSON into `drafts/captured/`, validates the current ArtifactVersion and
+Git snapshot digest, assigns deterministic record IDs, and atomically writes a
+promotion file. An explicit manual import adds `--allow-manual-source` and is
+recorded with `capture_origin: manual_import`. Repeating the same promotion is
+idempotent and does not append another `draft_promoted` event.
+
+## Immutable Git change snapshots
+
+```text
+scripts/consensus snapshot-git \
+  --run <run> --repository <path> --base-ref HEAD \
+  --artifact-version v2 --predecessor v1 --produced-by author
+```
+
+Worktree mode records the resolved repository root and base commit, a binary
+base-to-index staged patch, an index-to-worktree unstaged patch, the sorted
+untracked path inventory, and every untracked file's exact bytes. Supplying
+`--target-ref` records a binary base-to-target patch instead. CAC repeats the
+Git reads before publication and aborts if the index, worktree, refs, or
+untracked bytes changed. The resulting ArtifactVersion references
+`snapshots/git-change-*/manifest.json` and records the full snapshot digest.

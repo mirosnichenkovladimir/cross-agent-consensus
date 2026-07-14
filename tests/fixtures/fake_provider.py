@@ -29,6 +29,7 @@ def main() -> int:
             "child_process",
             "orphan_child",
             "digest_mismatch",
+            "draft_reviewer",
             "resumed",
         ],
     )
@@ -94,6 +95,25 @@ def main() -> int:
         time.sleep(60)
     elif args.mode == "digest_mismatch":
         print(json.dumps({"type": "result", "result": "reviewed", "input_sha256": "0" * 64}))
+    elif args.mode == "draft_reviewer":
+        draft = json.dumps(
+            {
+                "kind": "reviewer_findings",
+                "review_text": "No findings.",
+                "findings": [],
+            },
+            sort_keys=True,
+        )
+        print(
+            json.dumps(
+                {
+                    "type": "thread.started",
+                    "thread_id": args.session_id,
+                    "session_id": args.session_id,
+                }
+            )
+        )
+        print(json.dumps({"type": "result", "result": draft}))
     elif args.mode == "resumed":
         print(json.dumps({"type": "session", "session_id": args.session_id, "resumed": True}))
         print(json.dumps({"type": "result", "result": f"resumed:{prompt}"}))

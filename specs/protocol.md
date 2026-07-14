@@ -81,6 +81,9 @@ Validators are profile-defined or policy-defined. The base protocol does not req
 20. An implementation that records an ArtifactVersion content digest MUST recompute it before actor invocation and terminal output; a mismatch blocks both actions.
 21. An external CLI approval MUST bind the exact prompt, runtime argv, and working directory. If the target ArtifactVersion is a readable local file, the approval MUST also bind its content digest.
 22. `capture_origin=live_cli` evidence MUST reference the completed invocation session whose prompt, command, and payload produced that evidence.
+23. Worker drafts promoted into protocol records MUST contain authored content only; CAC code MUST assign run, record, actor, timestamp, hash, and provenance fields.
+24. Semantic duplicate or conflict resolution MUST be a captured participant invocation. Deterministic promotion MAY remove only byte-identical duplicates while preserving declared order.
+25. A code-review ArtifactVersion that references a Git change snapshot MUST bind a materialized snapshot digest. Live Git output MUST NOT replace that snapshot after participant invocation.
 
 ## 6. Round model
 
@@ -121,6 +124,24 @@ The Author output SHOULD include:
 - summary of decisions;
 - assumptions;
 - known limitations.
+
+### 6.3.1 Draft promotion and Git change snapshots
+
+An implementation MAY accept content-only Author, Reviewer, Validator, or
+synthesis drafts. Before a draft becomes protocol evidence, deterministic CAC
+code MUST validate the draft schema, preserve the exact source bytes, assign
+protocol identifiers and provenance, recompute the target ArtifactVersion, and
+write the promoted record atomically. Repeating the same draft with the same
+bindings MUST return the same promoted records.
+
+For a worktree code review, a Git change snapshot MUST record the resolved
+repository root and base revision, base-to-index staged diff,
+index-to-worktree unstaged diff, sorted untracked path inventory, and exact
+untracked contents. A base/target review MUST record both resolved revisions
+and their binary diff. Snapshot capture MUST reject concurrent repository
+mutation. ArtifactVersion MUST reference the immutable snapshot manifest and
+its complete digest. Output bound to another or changed snapshot is stale and
+MUST NOT be promoted.
 
 ### 6.4 Independent review phase
 

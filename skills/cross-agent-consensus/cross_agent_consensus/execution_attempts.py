@@ -411,10 +411,9 @@ def complete_attempt_for_receipt_locked(
     source: ReceiptAttemptSource,
     receipt: Record,
 ) -> None:
-    assert_attempt_accepts_receipt_locked(run, source, receipt.record_type)
     start = _attempt_start(run, source.execution_attempt_id)
     if start is None:
-        return
+        raise ValueError(f"execution attempt not found: {source.execution_attempt_id}")
     details = start["details"]
     artifact_id = (
         receipt.data.get("artifact_version_id")
@@ -434,6 +433,28 @@ def complete_attempt_for_receipt_locked(
         receipt.data.get("produced_by") != source.participant_identity
     ):
         raise ValueError("ArtifactVersion producer does not match execution attempt")
+    receipt_sha256 = canonical_json_sha256(
+        {
+            "record_type": receipt.record_type,
+            "record_id": receipt.record_id,
+            "data": receipt.data,
+        }
+    )
+    observations = _attempt_observations(run, source.execution_attempt_id)
+    if observations and observations[-1].get("event_type") == "execution_attempt_completed":
+        completed_details = observations[-1].get("details")
+        if not isinstance(completed_details, dict) or any(
+            (
+                completed_details.get("receipt_record_type") != receipt.record_type,
+                completed_details.get("receipt_record_id") != receipt.record_id,
+                completed_details.get("receipt_record_sha256") != receipt_sha256,
+            )
+        ):
+            raise ValueError(
+                "execution attempt already completed with another receipt"
+            )
+        return
+    assert_attempt_accepts_receipt_locked(run, source, receipt.record_type)
     records = parse_run_records(run)
     phase = derive_run_phase(records)
     append_run_event_locked(
@@ -448,13 +469,7 @@ def complete_attempt_for_receipt_locked(
             "session_id": source.session_id,
             "receipt_record_type": receipt.record_type,
             "receipt_record_id": receipt.record_id,
-            "receipt_record_sha256": canonical_json_sha256(
-                {
-                    "record_type": receipt.record_type,
-                    "record_id": receipt.record_id,
-                    "data": receipt.data,
-                }
-            ),
+            "receipt_record_sha256": receipt_sha256,
         },
     )
 

@@ -47,6 +47,8 @@ from cross_agent_consensus.config import (
     validate_config_shape,
 )
 from cross_agent_consensus.capture import cmd_capture
+from cross_agent_consensus.draft_promotion import cmd_promote_draft
+from cross_agent_consensus.git_snapshot import cmd_snapshot_git
 from cross_agent_consensus.prompt_command import (
     check_rereview_record_gate,
     cmd_prompt,
@@ -1119,6 +1121,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve and validate the prompt target without writing; prints the path that would be used.",
     )
     prompt.set_defaults(func=cmd_prompt)
+
+    promote = sub.add_parser(
+        "promote-draft",
+        help="Validate a content-only worker draft and write CAC-owned records.",
+    )
+    add_common_run_arg(promote)
+    promote.add_argument("--source-file", required=True)
+    promote.add_argument("--actor", required=True)
+    promote.add_argument("--round", default="round-1")
+    promote.add_argument("--artifact-version")
+    promote.add_argument("--review-batch")
+    promote.add_argument("--validator-id")
+    promote.add_argument("--predecessor")
+    promote.add_argument("--content-locator")
+    promote.add_argument("--source-record", action="append", default=[])
+    promote.add_argument(
+        "--allow-manual-source",
+        action="store_true",
+        help="Explicitly import a draft that has no completed supervised-session evidence.",
+    )
+    promote.set_defaults(func=cmd_promote_draft)
+
+    snapshot_git = sub.add_parser(
+        "snapshot-git",
+        help="Materialize an immutable Git change snapshot and ArtifactVersion.",
+    )
+    add_common_run_arg(snapshot_git)
+    snapshot_git.add_argument("--repository", default=".")
+    snapshot_git.add_argument("--base-ref", default="HEAD")
+    snapshot_git.add_argument("--target-ref")
+    snapshot_git.add_argument("--artifact-version", required=True)
+    snapshot_git.add_argument("--predecessor")
+    snapshot_git.add_argument("--produced-by", required=True)
+    snapshot_git.add_argument("--actor", default="orchestrator-git-snapshot")
+    snapshot_git.set_defaults(func=cmd_snapshot_git)
 
     capture = sub.add_parser(
         "capture",

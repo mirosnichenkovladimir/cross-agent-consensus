@@ -329,6 +329,24 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
     scope = first_record(records, "ReviewScope")
     batch = selected_review_batch(records, args)
     artifact = select_artifact(records, args.artifact_version)
+    if (
+        args.phase in {"reviewer", "rereview", "validator"}
+        and args.artifact_version is not None
+        and artifact is None
+    ):
+        raise ValueError(f"ArtifactVersion not found: {args.artifact_version}")
+    if (
+        args.phase in {"reviewer", "rereview", "validator"}
+        and batch is not None
+        and artifact is not None
+        and batch.data.get("target_artifact_version_id")
+        != artifact.data.get("artifact_version_id")
+    ):
+        raise ValueError(
+            f"ReviewBatch {batch.record_id} targets ArtifactVersion "
+            f"{batch.data.get('target_artifact_version_id')}, not "
+            f"{artifact.data.get('artifact_version_id')}"
+        )
     lines = [
         f"# Cross-Agent Consensus {args.phase.title()} Prompt",
         "",

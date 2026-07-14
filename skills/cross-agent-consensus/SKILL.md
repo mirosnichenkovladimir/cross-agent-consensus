@@ -247,6 +247,22 @@ or compatibility rule also requires `--operator-identity`, and named choices
 require `--definition-drift-reference`. Cross-reviewer provider-session reuse
 is invalid even when both reviewers use the same ExecutionProfile.
 
+Workers may emit content-only JSON drafts for Author artifacts, Reviewer
+findings, Validator evidence, and semantic synthesis. Use `promote-draft`; do
+not let worker JSON supply run IDs, record IDs, actor IDs, timestamps, hashes,
+or provenance. The finalizer captures the exact draft bytes, validates the
+declared content fields, assigns CAC-owned fields, and writes one
+`draft_promoted` RunJournal entry. Exact duplicate Reviewer findings are
+removed without semantic merging. Synthesis stays a named participant
+invocation with declared source-record IDs.
+
+For code review, use `snapshot-git --base-ref ... --artifact-version ...`
+before generating participant prompts. The snapshot contains resolved Git
+revisions, binary staged/unstaged or base/target patches, and exact untracked
+bytes. `ArtifactVersion` binds its manifest and full snapshot digest. Never
+substitute a live `git diff` after invocation; a repository mutation during
+capture or a changed snapshot digest blocks promotion.
+
 ## Terse Invocation Behavior
 
 For terse `cac: <task_description>` invocations, treat `<task_description>` as the TaskBrief objective. If the task asks to design, implement, write, fix, analyze, migrate, or otherwise produce work, the first phase is Author execution and the second phase is Reviewer/Validator validation. If the task only asks to review an existing artifact, skip Author execution and start from the review batch after initialization.

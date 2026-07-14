@@ -77,6 +77,15 @@ def verified_artifact_sha256(run: Path, record: Record) -> str | None:
         raise ValueError(
             f"ArtifactVersion {record.record_id} drifted: recorded sha256={recorded}, current sha256={current}"
         )
+    snapshot_sha256 = record.data.get("git_change_snapshot_sha256")
+    if snapshot_sha256 is not None:
+        if not isinstance(snapshot_sha256, str):
+            raise ValueError(
+                f"ArtifactVersion {record.record_id} Git snapshot sha256 is not a string"
+            )
+        from cross_agent_consensus.git_snapshot import verify_git_change_snapshot
+
+        verify_git_change_snapshot(path, snapshot_sha256)
     return current
 
 
@@ -364,6 +373,30 @@ def artifact_integrity_messages(run: Path, records: list[Record]) -> list[str]:
 
 def integrity_messages(run: Path, records: list[Record]) -> list[str]:
     messages = artifact_integrity_messages(run, records)
+
+    for record in records:
+        draft_path = record.data.get("draft_payload_path")
+        draft_sha256 = record.data.get("draft_payload_sha256")
+        if draft_path is None and draft_sha256 is None:
+            continue
+        if not isinstance(draft_path, str) or not isinstance(draft_sha256, str):
+            messages.append(
+                f"{record.path}:{record.heading_line}: draft payload path and sha256 must both be strings"
+            )
+            continue
+        try:
+            captured_draft = _payload_path(run, draft_path, "draft_payload_path")
+        except ValueError as exc:
+            messages.append(f"{record.path}:{record.heading_line}: {exc}")
+            continue
+        if not captured_draft.is_file():
+            messages.append(
+                f"{record.path}:{record.heading_line}: draft payload not found: {draft_path}"
+            )
+        elif sha256_file(captured_draft) != draft_sha256:
+            messages.append(
+                f"{record.path}:{record.heading_line}: draft payload sha256 mismatch: {draft_path}"
+            )
 
     for record in records_by_type(records, "RawReviewerOutput"):
         payload_path = record.data.get("raw_payload_path")

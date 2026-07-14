@@ -28,7 +28,7 @@ Install the manual `cross-agent-consensus` skill package with the terse `cac` in
 ./scripts/install-cac --target all --update
 ```
 
-The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.15.0 keeps CAC process sessions separate from Codex/Claude provider conversations and resumes a provider conversation only through a bound `provider_session_captured` RunJournal entry.
+The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.16.0 promotes content-only worker drafts through CAC-owned finalizers and binds code-review invocations to immutable Git change snapshots. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
 
 Trigger examples after install:
 
@@ -48,6 +48,12 @@ When `skills/cross-agent-consensus/scripts/consensus` is available, use it for d
 - `config show|validate|paths|setup` handles installed, user-local, project, task-file, and CLI configuration.
 - `prompt` writes exact reviewer, author, validator, re-review, and final-report prompts into the run folder.
 - `capture` preserves raw reviewer, validator, and manual evidence output as protocol records.
+- `promote-draft` rejects worker-supplied protocol identity fields, captures the
+  content-only JSON source, and writes CAC-owned Author, Reviewer, Validator,
+  or synthesis output with deterministic identifiers and provenance.
+- `snapshot-git` captures resolved revisions, staged/unstaged/target binary
+  patches, and exact untracked bytes into a content-addressed snapshot, then
+  creates the bound `ArtifactVersion`.
 - `validate --integrity` recomputes recorded artifact, prompt, and evidence
   digests; `validate --run-events` checks the hash-chained mutation journal and
   `.cac-events-anchor.json` against deletion, edits, and suffix truncation.

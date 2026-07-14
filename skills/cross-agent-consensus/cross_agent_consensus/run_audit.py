@@ -340,6 +340,10 @@ def command_event_details(args: Any) -> dict[str, Any]:
         "terminal_condition",
         "validator_id",
         "result",
+        "promotion_id",
+        "source_draft_sha256",
+        "promoted_record_ids",
+        "git_change_snapshot_sha256",
     ):
         value = getattr(args, attribute, None)
         if value is not None:
@@ -367,7 +371,8 @@ def locked_run_command(
                 return_code = function(*function_args, **function_kwargs)
                 records_after = parse_run_records(run)
                 records_changed = records_after != records_before
-                if return_code == 0 or records_changed:
+                suppress_run_event = bool(getattr(args, "suppress_run_event", False))
+                if (return_code == 0 or records_changed) and not suppress_run_event:
                     details = command_event_details(args)
                     if return_code != 0:
                         details["command_return_code"] = return_code

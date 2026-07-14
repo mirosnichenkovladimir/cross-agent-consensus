@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.16.0] - 2026-07-14
+
+### Added
+- `promote-draft` accepts content-only Author, Reviewer, Validator, and
+  synthesis JSON drafts. The deterministic finalizer assigns protocol
+  identifiers, participant bindings, timestamps, hashes, and captured-session
+  provenance before atomically writing CAC-owned records.
+- `snapshot-git` materializes the resolved repository root and revisions,
+  binary staged/unstaged/target patches, untracked inventory, and exact
+  untracked bytes under an immutable content-addressed snapshot directory.
+- Git snapshot `ArtifactVersion` records bind both the manifest file hash and
+  the complete change-snapshot digest.
+
+### Changed
+- Draft promotion rejects worker-supplied protocol identity or provenance
+  fields. Exact duplicate findings are removed byte-for-byte while declared
+  order remains unchanged.
+- Semantic synthesis requires declared source record identifiers and, by
+  default, a completed supervised participant session. Manual imports require
+  the explicit `--allow-manual-source` boundary.
+
+### Fixed
+- Git snapshot capture repeats every Git read before publication and rejects a
+  worktree or index mutation instead of mixing bytes from two repository states.
+- Draft promotion recomputes the bound ArtifactVersion and Git snapshot hashes,
+  so output from a stale review target cannot enter protocol records.
+- Supervised promotion binds the provider stream and parsed content-only draft
+  as separate digests; both files must match the captured session evidence.
+- A retry after the promoted record was written completes or verifies the same
+  execution-attempt receipt and restores the missing `draft_promoted` event.
+- Artifact verification recomputes every Git snapshot member byte count and
+  SHA-256, its declared inventory, and the canonical descriptor digest.
+- Reviewer promotion rejects a `ReviewBatch` that differs from the supervised
+  prompt path, and prompt generation rejects an unknown explicit
+  `ArtifactVersion`.
+- Reviewer deduplication compares exact source JSON tokens; semantic duplicate
+  resolution remains a captured synthesis action.
+
 ## [0.15.0] - 2026-07-14
 
 ### Added

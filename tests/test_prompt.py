@@ -12,6 +12,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from cross_agent_consensus.models import PromptCommandInput, Record
 from cross_agent_consensus.prompts import (
     active_review_batches,
+    build_prompt,
     is_conclusion_validation_batch,
     proposed_conclusion_for_finding,
     resolve_active_round,
@@ -22,6 +23,78 @@ from cross_agent_consensus.prompts import (
 
 
 class PromptTests(unittest.TestCase):
+    def test_reviewer_prompt_rejects_missing_explicit_artifact(self) -> None:
+        records = [
+            Record(
+                "ReviewBatch",
+                "batch-v1",
+                Path("rounds/round-001/round.md"),
+                1,
+                {
+                    "review_batch_id": "batch-v1",
+                    "round_id": "round-1",
+                    "target_artifact_version_id": "v1",
+                },
+            )
+        ]
+        args = PromptCommandInput(
+            run="run",
+            phase="reviewer",
+            actor="reviewer",
+            artifact_version="missing",
+            round="round-1",
+            review_batch="batch-v1",
+            output=None,
+            force_draft=False,
+            dry_run=False,
+        )
+
+        with self.assertRaisesRegex(ValueError, "ArtifactVersion not found: missing"):
+            build_prompt(args, records)
+
+    def test_reviewer_prompt_rejects_artifact_outside_review_batch(self) -> None:
+        records = [
+            Record(
+                "ReviewBatch",
+                "batch-v1",
+                Path("rounds/round-001/round.md"),
+                1,
+                {
+                    "review_batch_id": "batch-v1",
+                    "round_id": "round-1",
+                    "target_artifact_version_id": "v1",
+                },
+            ),
+            Record(
+                "ArtifactVersion",
+                "v1",
+                Path("artifacts/v1.md"),
+                1,
+                {"artifact_version_id": "v1"},
+            ),
+            Record(
+                "ArtifactVersion",
+                "v2",
+                Path("artifacts/v2.md"),
+                1,
+                {"artifact_version_id": "v2"},
+            ),
+        ]
+        args = PromptCommandInput(
+            run="/tmp/run",
+            phase="reviewer",
+            actor="reviewer",
+            artifact_version="v2",
+            round="round-1",
+            review_batch="batch-v1",
+            output=None,
+            force_draft=False,
+            dry_run=False,
+        )
+
+        with self.assertRaisesRegex(ValueError, "targets ArtifactVersion v1, not v2"):
+            build_prompt(args, records)
+
     def test_later_review_batch_does_not_relocate_first_batch_prompt(self) -> None:
         run = Path("/tmp/sample-consensus-001")
         records = [
