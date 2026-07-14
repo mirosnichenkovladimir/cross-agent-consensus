@@ -131,4 +131,4 @@ The three configuration mappings have separate meanings:
 - `execution_profiles`: adapter, argv, optional model/reasoning effort, prompt transport, output mode, resume declaration, and environment-variable names;
 - `participant_identities`: one Participant Profile and one Execution Profile selected for each stable Participant Identity.
 
-Execution Profile argv is an explicit command preset. It does not bypass `invocation-ready`, does not authorize launch, and does not permit dynamic provider substitution. Schema `cross-agent-consensus-config-1` and `reviewer_clis` remain readable with deprecation warnings in 0.12.x; migrate before their scheduled removal in 0.13.0.
+Execution Profile argv is an explicit command preset. It does not bypass `invocation-ready`, does not authorize launch, and does not permit dynamic provider substitution. Version 0.13.0 rejects schema `cross-agent-consensus-config-1` and `reviewer_clis`; use `cross-agent-consensus-config-2`, `execution_profiles`, and `participant_identities`.

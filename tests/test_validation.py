@@ -13,6 +13,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from cross_agent_consensus.markdown_records import frontmatter
 from cross_agent_consensus.models import Record
 from cross_agent_consensus.record_schema import KNOWN_RECORD_TYPES, REQUIRED_FIELDS
+from cross_agent_consensus.records import RunSnapshot
 from cross_agent_consensus.validation import (
     check_links,
     check_records,
@@ -183,11 +184,94 @@ class ValidationTests(unittest.TestCase):
 
     def test_validator_status_uses_latest_seen_result(self) -> None:
         records = [
-            Record("ValidationEvidence", "one", Path("validation.md"), 1, {"validator_id": "smoke", "result": "fail"}),
-            Record("ValidationEvidence", "two", Path("validation.md"), 2, {"validator_id": "smoke", "result": "pass"}),
+            Record(
+                "ArtifactVersion",
+                "v1",
+                Path("artifacts/v1.md"),
+                1,
+                {"artifact_version_id": "v1", "predecessor_id_or_null": None},
+            ),
+            Record(
+                "ValidationEvidence",
+                "one",
+                Path("validation.md"),
+                1,
+                {"validator_id": "smoke", "target_artifact_version_id": "v1", "result": "fail"},
+            ),
+            Record(
+                "ValidationEvidence",
+                "two",
+                Path("validation.md"),
+                2,
+                {"validator_id": "smoke", "target_artifact_version_id": "v1", "result": "pass"},
+            ),
         ]
 
         self.assertEqual(validator_status(records), {"smoke": "pass"})
+
+    def test_validator_status_rejects_evidence_when_artifact_chain_branches(self) -> None:
+        records = [
+            Record(
+                "ArtifactVersion",
+                "v1",
+                Path("artifacts/v1.md"),
+                1,
+                {"artifact_version_id": "v1", "predecessor_id_or_null": None},
+            ),
+            Record(
+                "ArtifactVersion",
+                "v2",
+                Path("artifacts/v2.md"),
+                1,
+                {"artifact_version_id": "v2", "predecessor_id_or_null": "v1"},
+            ),
+            Record(
+                "ArtifactVersion",
+                "v3",
+                Path("artifacts/v3.md"),
+                1,
+                {"artifact_version_id": "v3", "predecessor_id_or_null": "v1"},
+            ),
+            Record(
+                "ValidationEvidence",
+                "pytest-v1",
+                Path("validation.md"),
+                1,
+                {"validator_id": "pytest", "target_artifact_version_id": "v1", "result": "pass"},
+            ),
+        ]
+
+        self.assertEqual(validator_status(records), {})
+
+    def test_record_validation_rejects_malformed_created_at(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name)
+            record = Record(
+                "ArtifactVersion",
+                "v1",
+                run / "artifacts" / "v1.md",
+                1,
+                {
+                    "record_type": "ArtifactVersion",
+                    "schema_version": "m2-markdown-2",
+                    "run_id": "run-001",
+                    "actor_identity": "author",
+                    "created_at": "not-a-timestamp",
+                    "artifact_version_id": "v1",
+                    "predecessor_id_or_null": None,
+                    "content_locator": "README.md",
+                    "content_hash_or_null": None,
+                    "produced_by": "author",
+                },
+            )
+
+            result = check_records(
+                run,
+                RunSnapshot(run=run, records=[record], diagnostics=[], by_type={"ArtifactVersion": [record]}),
+            )
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("created_at invalid ISO 8601 timestamp" in message for message in result.messages))
 
     def test_unresolved_blockers_filters_non_blocking_findings(self) -> None:
         records = [
@@ -439,6 +523,48 @@ class ValidationTests(unittest.TestCase):
 
         self.assertEqual(unresolved_blockers(records), ["blocking"])
         self.assertEqual(unresolved_needs_human(records), ["blocking"])
+
+    def test_binding_human_resolution_closes_blocker_and_needs_human_decision(self) -> None:
+        records = [
+            Record(
+                "NormalizedFinding",
+                "blocking",
+                Path("normalization.md"),
+                1,
+                {
+                    "normalized_finding_id": "blocking",
+                    "scope_classification": "in_scope",
+                    "blocking_status": "blocking",
+                    "materiality": "material",
+                    "lifecycle_state": "open",
+                },
+            ),
+            Record(
+                "ReReviewDecision",
+                "needs-human",
+                Path("rereviews/codex.md"),
+                1,
+                {
+                    "normalized_finding_id": "blocking",
+                    "reviewer_identity": "codex",
+                    "decision": "needs_human",
+                },
+            ),
+            Record(
+                "HumanDecision",
+                "resolved-by-human",
+                Path("escalations.md"),
+                1,
+                {
+                    "decision_type": "mark_resolved",
+                    "affected_finding_ids_or_validator_ids": ["blocking"],
+                    "created_at": "2026-07-14T12:00:00Z",
+                },
+            ),
+        ]
+
+        self.assertEqual(unresolved_blockers(records), [])
+        self.assertEqual(unresolved_needs_human(records), [])
 
     def test_mixed_resolving_decisions_keep_blocker_open(self) -> None:
         records = [

@@ -53,7 +53,20 @@ When `skills/cross-agent-consensus/scripts/consensus` is available, use it for d
   `.cac-events-anchor.json` against deletion, edits, and suffix truncation.
 - `conclusion-validation` creates a `scope_triage` batch where the same reviewers validate proposed Normalized Finding conclusions. This is not a fresh review; reviewers answer `agree`, `disagree`, or `needs_human` and must include rationale.
 - `invoke-agent`, `agent-status`, `agent-watch`, and `agent-cancel` run and monitor explicitly configured external reviewer CLIs with session telemetry.
+- `next --json` derives a byte-stable `NextActionPlan` from validated protocol records, `events.jsonl`, `ConfigResolution`, and Execution Profiles. It names runnable actions, missing/conflicting records, pending checkpoint choices, and terminal status; it launches nothing and writes nothing. `record_journal_sha256` hashes only the ordered protocol-record frontmatter and RunJournal entries; integrity diagnostics separately cover artifact, prompt, evidence, and session files.
 - `terminate` writes the terminal human verification artifact, `report.md`.
+
+An `invoke-<participant>-reviewer` action means the bounded fresh-review
+`consensus run` macro for that Participant Identity and ReviewBatch, not a bare
+provider process call. The macro runs pre-execution record checks while writing
+the exact prompt, checks invocation readiness, consumes the scoped approval,
+launches the recorded Execution Profile, and appends RawReviewerOutput. Author,
+AuthorResponse, re-review, and validator phases retain explicit record-producing
+actions until their macros can append ArtifactVersion, AuthorResponse,
+ReReviewDecision, and ValidationEvidence respectively. A pending operator
+checkpoint withholds the `invoke-*` action until Policy authorizes the batch and
+round; supervised execution consumes explicit exact-input approval in the
+`consensus run` command itself.
 
 Every CLI-created run uses `.cac.lock` to serialize protocol-record writes and
 appends successful mutations to `events.jsonl`. `status` derives the current
@@ -79,7 +92,7 @@ Configuration schema `cross-agent-consensus-config-2` separates three names:
 
 `participant_identities` binds each stable Participant Identity to one Participant Profile and one Execution Profile. Switching that binding changes the invocation without renaming the reviewer, author, or validator. `ConfigResolution`, `OperatorApproval`, and `invocation.json` record the selected profile identifiers and effective argv. CAC inserts `model` and `reasoning_effort` into provider-specific argv, includes Participant Profile instructions in finalized prompts below immutable CAC rules, and passes only environment-variable names listed by the Execution Profile. Exact-input approval hashes the complete resolved Execution Profile.
 
-The 0.12.x reader translates `cross-agent-consensus-config-1` and `reviewer_clis` with deprecation warnings. These compatibility inputs are scheduled for removal in 0.13.0.
+Version 0.13.0 accepts only `cross-agent-consensus-config-2`; migrate `reviewer_clis` entries to `execution_profiles` plus `participant_identities` before loading the configuration.
 
 ## Terminal Report
 

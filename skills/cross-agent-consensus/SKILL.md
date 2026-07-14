@@ -125,7 +125,22 @@ When `scripts/consensus` is present in the installed skill package, prefer it fo
 - run `scripts/consensus invocation-ready` before any direct external CLI/runtime invocation;
 - run `scripts/consensus capture` after command/manual output to preserve raw evidence in the run folder;
 - run `scripts/consensus status` before remediation loops to inspect ReReviewDecision attempt counts and agent session accounting;
+- run `scripts/consensus next --run <run> --json` to derive the next action from validated run records and the RunJournal without launching a participant or writing a run file;
 - run `scripts/consensus validate --terminal` and `scripts/consensus terminate` before making a terminal consensus claim.
+
+In `NextActionPlan`, an `invoke-<participant>-reviewer` action means the bounded
+fresh-review `scripts/consensus run` macro for that Participant Identity and
+ReviewBatch, not a bare provider process call. The macro runs pre-execution
+record checks while finalizing the exact prompt, checks invocation readiness,
+consumes the scoped approval, invokes the recorded Execution Profile, and
+appends RawReviewerOutput. Author, AuthorResponse, re-review, and validator
+phases retain explicit record-producing actions until their macros can append
+ArtifactVersion, AuthorResponse, ReReviewDecision, and ValidationEvidence. A
+pending operator checkpoint withholds the `invoke-*` action; supervised
+execution consumes explicit exact-input approval in the `scripts/consensus run`
+command itself.
+`record_journal_sha256` hashes the ordered protocol-record frontmatter and
+RunJournal entries only; file-integrity checks supply separate blockers.
 
 If the script is unavailable or fails for a host-specific reason, follow the existing template workflow manually and record the gap in the run folder.
 
@@ -139,6 +154,7 @@ Each helper has a required-flags minimum that `--help` documents; the most commo
 - `consensus invocation-ready`: `--run`, `--actor`, `--prompt`, `--raw-output`, `--command -- <argv>`.
 - `consensus invoke-agent`: `--run`, `--actor`, `--player`, `--phase`, `--prompt`, `--raw-output`, `--command -- <argv>`.
 - `consensus agent-status` / `agent-peek` / `agent-watch` / `agent-cancel`: `--run`, `--actor`.
+- `consensus next`: `--run`; add `--json` for the byte-stable `NextActionPlan` contract.
 - `consensus normalize`: `--run`, `--round`.
 - `consensus report` / `terminate`: `--run`, `--terminal-condition`.
 
@@ -205,7 +221,7 @@ Use these commands for configuration:
 - `scripts/consensus config paths`;
 - `scripts/consensus config setup [--dry-run]`.
 
-Configuration schema `cross-agent-consensus-config-2` separates `participant_profiles`, `execution_profiles`, and `participant_identities`. A Participant Identity may select another Execution Profile without changing its protocol name. Persistent installed, user-local, and project config must not contain secret values or enable unattended invocation. `model` and `reasoning_effort` are translated into provider-specific argv; conflicting duplicate argv declarations are rejected. Participant Profile instructions are copied into finalized prompts and remain subordinate to CAC Policy, ReviewScope, and phase output requirements. Child CLIs receive only environment-variable names declared by the Execution Profile, while values remain unrecorded. Execution Profile argv is a preset for explicit invocation only; `invocation-ready` must still pass and the prompt/raw-output paths must be recorded before any external reviewer CLI is run. `consensus init` records the resolved identity/profile mapping and effective commands in `ConfigResolution` before any config-derived value is used. Schema `cross-agent-consensus-config-1` and `reviewer_clis` are accepted with deprecation warnings in 0.12.x and are scheduled for removal in 0.13.0.
+Configuration schema `cross-agent-consensus-config-2` separates `participant_profiles`, `execution_profiles`, and `participant_identities`. A Participant Identity may select another Execution Profile without changing its protocol name. Persistent installed, user-local, and project config must not contain secret values or enable unattended invocation. `model` and `reasoning_effort` are translated into provider-specific argv; conflicting duplicate argv declarations are rejected. Participant Profile instructions are copied into finalized prompts and remain subordinate to CAC Policy, ReviewScope, and phase output requirements. Child CLIs receive only environment-variable names declared by the Execution Profile, while values remain unrecorded. Execution Profile argv is a preset for explicit invocation only; `invocation-ready` must still pass and the prompt/raw-output paths must be recorded before any external reviewer CLI is run. `consensus init` records the resolved identity/profile mapping and effective commands in `ConfigResolution` before any config-derived value is used. Version 0.13.0 rejects `cross-agent-consensus-config-1` and `reviewer_clis`; migrate them to schema 2 before loading the configuration.
 
 ## Terse Invocation Behavior
 

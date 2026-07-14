@@ -527,10 +527,34 @@ def cmd_run(args: RunCommandInput) -> int:
         for actor in actors
     ]
 
+    prompt_plans = plans
+    if phase == "reviewer":
+        prompt_actors = _resolve_actors(records, round_id=round_id, phase=phase, requested=None)
+        selected_plans = {plan.actor: plan for plan in plans}
+        prompt_plans = [
+            selected_plans.get(actor)
+            or _build_plan(
+                records,
+                run,
+                round_id=round_id,
+                phase=phase,
+                actor=actor,
+                cwd=cwd,
+                idle_timeout_seconds=getattr(args, "idle_timeout_seconds", DEFAULT_IDLE_TIMEOUT_SECONDS),
+                stale_timeout_seconds=getattr(args, "stale_timeout_seconds", DEFAULT_STALE_TIMEOUT_SECONDS),
+                heartbeat_interval_seconds=getattr(
+                    args,
+                    "heartbeat_interval_seconds",
+                    DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+                ),
+            )
+            for actor in prompt_actors
+        ]
+
     print(f"resolved actors for phase={phase} round={round_id}: {', '.join(actors)}")
 
     # Step 2 — prompt finalization (always, regardless of --execute-reviewers)
-    prompt_errors = _finalize_prompts(run, plans=plans)
+    prompt_errors = _finalize_prompts(run, plans=prompt_plans)
     if prompt_errors:
         for message in prompt_errors:
             eprint(f"error: {message}")

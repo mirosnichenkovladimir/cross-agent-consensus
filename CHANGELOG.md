@@ -9,6 +9,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.13.0] - 2026-07-14
+
+### Added
+- `consensus next --run <path> --json` returns a byte-stable
+  `NextActionPlan` derived from protocol records, the hash-chained RunJournal,
+  `ConfigResolution`, and Execution Profiles. It launches no participant and
+  writes no run files.
+- `NextActionPlan` names runnable action IDs, missing or conflicting records,
+  required records, operator/human checkpoint choices with consequences, and
+  terminal success, failure, or unresolved status.
+- Planner tests cover every `derive_run_phase()` value, missing-record
+  blockers, conflicting singleton records, human checkpoints, terminal
+  conditions, repeatable JSON, and read-only CLI execution.
+
+### Changed
+- A unanimously resolving `ReReviewDecision` set in the latest remediation
+  `ReviewBatch` advances the derived phase to validation or termination.
+- Configuration accepts only `cross-agent-consensus-config-2`.
+  `cross-agent-consensus-config-1` and `reviewer_clis` now fail with migration
+  diagnostics instead of being translated.
+
+### Fixed
+- Phase derivation and terminal validation now apply the same latest-batch and
+  binding `HumanDecision` resolution rules.
+- The first 0.13 mutation of a compatible 0.12 run records the explicit
+  `awaiting_rereview` compatibility transition without breaking RunJournal
+  adjacency or its SHA-256 chain.
+- Public action and checkpoint identifiers add a stable digest when `slugify()`
+  would lose information, so distinct protocol identifiers cannot collapse.
+- A recorded `OperatorApproval` does not clear the planner checkpoint for an
+  unspecified future prompt, player, or working directory; the concrete
+  invocation still consumes the exact-input approval.
+- Terminal records take precedence over stale per-finding checkpoints, while
+  run-scoped abort and human-escalation decisions take precedence before
+  termination is recorded.
+- Artifact selection follows the unique `predecessor_id_or_null` chain head;
+  duplicate identifiers, missing predecessors, branches, and cycles invalidate
+  the plan instead of selecting the lexicographically last artifact file.
+- A binding `waive_validator` decision requests waived `ValidationEvidence`
+  instead of running the validator it names.
+- Re-review invocation and approval IDs include their ReviewBatch, and scoped
+  unattended policy is evaluated against that batch's round instead of the
+  globally last round.
+- Only each affected identifier's latest EscalationRecord can create a pending
+  human checkpoint; a newer escalation does not resurrect older checkpoints.
+- Fresh-review `invoke-*-reviewer` actions are bounded `consensus run` macros
+  that finalize prompts, run pre-execution and invocation-readiness checks,
+  consume approval, launch the Execution Profile, and append
+  `RawReviewerOutput`. Other participant phases retain explicit
+  record-producing actions until their macros can append the required protocol
+  record.
+- `record_journal_sha256` replaces the ambiguous `input_sha256` field and names
+  its exact protocol-frontmatter and RunJournal coverage.
+- A remediation ReviewBatch derives `awaiting_rereview` before decisions exist,
+  and the planner checks the per-reviewer remediation cap before proposing the
+  next batch invocation.
+- `abort_run` and `terminate_escalated_to_human` decisions must target exactly
+  `__run_scope__`; finding- or validator-scoped terminal decisions invalidate
+  the plan.
+- An invocation awaiting OperatorApproval is withheld from `runnable_actions`
+  and reported through its checkpoint and required `OperatorApproval` record.
+- A CLI command that writes a protocol record before returning nonzero now
+  appends a RunJournal mutation event with the return code; the next event uses
+  the preceding journal phase so manual protocol edits cannot break adjacency.
+- Binding HumanDecision records can require a newer ArtifactVersion regardless
+  of decision type, and `dispute_materiality` reopens a closed non-material
+  NormalizedFinding.
+- Validator status and terminal readiness use only ValidationEvidence targeting
+  the current ArtifactVersion predecessor-chain head.
+- Record validation and termination reject duplicate, missing, branched,
+  cyclic, or stale ArtifactVersion chains through the same resolver used by the
+  planner; consensus termination must name the unique chain head.
+- Protocol timestamps are compared as timezone-aware UTC instants, with durable
+  record order breaking equal-timestamp ties, and malformed timestamps fail
+  record validation.
+- `dispute_materiality` starts a new finding epoch: AuthorResponse,
+  remediation ReviewBatch, and ReReviewDecision records from before the binding
+  decision cannot satisfy the reopened finding.
+- The latest binding `dispute_materiality` boundary persists across later
+  non-resolving HumanDecision records such as `require_revision`; only a later
+  resolving decision closes the materiality dispute.
+- A participant-scoped fresh-review macro finalizes prompts for every expected
+  same-round reviewer before invocation readiness, so the first reviewer in a
+  multi-reviewer batch is runnable.
+- Record and RunJournal diagnostics short-circuit malformed inputs before phase
+  derivation; an existing corrupt run cannot be reported as `initialize-run`.
+
 ## [0.12.0] - 2026-07-14
 
 ### Added

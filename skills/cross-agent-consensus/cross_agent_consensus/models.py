@@ -97,6 +97,34 @@ class ParticipantIdentity:
 
 
 @dataclass(frozen=True)
+class CheckpointChoice:
+    choice_id: str
+    consequence: str
+
+
+@dataclass(frozen=True)
+class PendingCheckpoint:
+    checkpoint_id: str
+    checkpoint_type: str
+    record_id: str
+    choices: tuple[CheckpointChoice, ...]
+
+
+@dataclass(frozen=True)
+class NextActionPlan:
+    schema_version: str
+    run_id: str
+    phase: str
+    plan_status: str
+    terminal_status: str
+    runnable_actions: tuple[str, ...]
+    blockers: tuple[str, ...]
+    required_records: tuple[str, ...]
+    pending_checkpoints: tuple[PendingCheckpoint, ...]
+    record_journal_sha256: str
+
+
+@dataclass(frozen=True)
 class ResolvedInvocationProfile:
     participant_profile_id: str
     execution_profile_id: str

@@ -236,7 +236,7 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(resolution.provenance["participant_identities.codex.execution_profile_id"], "project")
 
-    def test_v1_reviewer_cli_translates_with_deprecation_warning(self) -> None:
+    def test_v1_reviewer_cli_is_rejected_after_0_12(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             project = Path(tmp_name)
             config = project / ".cross-agent-consensus.yaml"
@@ -259,16 +259,9 @@ class ConfigTests(unittest.TestCase):
 
             resolution, _ = resolve_config(cwd=project, strict=True)
 
-        self.assertEqual(resolution.errors, [])
-        self.assertTrue(any("config-1 is deprecated" in warning for warning in resolution.warnings))
-        self.assertTrue(any("reviewer_clis is deprecated" in warning for warning in resolution.warnings))
-        self.assertEqual(
-            resolution.effective["participant_identities"]["codex"]["execution_profile_id"],
-            "legacy-codex-execution",
-        )
-        legacy_env = resolution.effective["execution_profiles"]["legacy-codex-execution"]["env"]
-        self.assertIn("HOME", legacy_env)
-        self.assertIn("PATH", legacy_env)
+        self.assertTrue(any("schema_version must be cross-agent-consensus-config-2" in error for error in resolution.errors))
+        self.assertTrue(any("reviewer_clis was removed in 0.13.0" in error for error in resolution.errors))
+        self.assertNotIn("legacy-codex-execution", resolution.effective["execution_profiles"])
 
     def test_duplicate_yaml_identifier_is_rejected_before_mapping_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

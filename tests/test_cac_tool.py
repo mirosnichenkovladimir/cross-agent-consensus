@@ -1154,7 +1154,7 @@ class ConsensusToolTests(unittest.TestCase):
             (project / ".cross-agent-consensus.yaml").write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "defaults:",
                         "  run_root: configured-runs",
                         "participants:",
@@ -1162,6 +1162,16 @@ class ConsensusToolTests(unittest.TestCase):
                         "  author: author-project",
                         "  reviewers:",
                         "    - reviewer-project",
+                        "participant_identities:",
+                        "  orchestrator-project:",
+                        "    participant_profile_id: orchestrator-default",
+                        "    execution_profile_id: manual-default",
+                        "  author-project:",
+                        "    participant_profile_id: author-default",
+                        "    execution_profile_id: manual-default",
+                        "  reviewer-project:",
+                        "    participant_profile_id: reviewer-default",
+                        "    execution_profile_id: manual-default",
                     ]
                 ),
                 encoding="utf-8",
@@ -1229,7 +1239,7 @@ class ConsensusToolTests(unittest.TestCase):
             user_config.write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "defaults:",
                         "  run_root: user-runs",
                     ]
@@ -1263,7 +1273,7 @@ class ConsensusToolTests(unittest.TestCase):
             config.write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "invocation:",
                         "  unattended_invocation:",
                         "    enabled: true",
@@ -1282,11 +1292,15 @@ class ConsensusToolTests(unittest.TestCase):
             config.write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
-                        "reviewer_clis:",
-                        "  reviewer-a:",
+                        "schema_version: cross-agent-consensus-config-2",
+                        "execution_profiles:",
+                        "  reviewer-a-execution:",
+                        "    adapter: generic-cli",
                         "    command:",
                         "      - tool",
+                        "    prompt_transport: stdin",
+                        "    output_mode: raw_stdout",
+                        "    supports_resume: false",
                         "    env:",
                         "      API_KEY: abc123",
                     ]
@@ -1296,7 +1310,7 @@ class ConsensusToolTests(unittest.TestCase):
 
             result = self.run_cli("config", "validate", "--config", str(config))
             self.assertEqual(result.returncode, 2)
-            self.assertIn("env must be a list of environment variable names", result.stdout)
+            self.assertIn("env must contain environment variable names only", result.stdout)
             self.assertIn("secret-looking key", result.stdout)
 
     def test_config_validate_rejects_invalid_round_limit_type(self) -> None:
@@ -1305,7 +1319,7 @@ class ConsensusToolTests(unittest.TestCase):
             config.write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "defaults:",
                         "  round_limits:",
                         "    max_fresh_review_rounds: many",
@@ -1327,7 +1341,7 @@ class ConsensusToolTests(unittest.TestCase):
             (project / ".cross-agent-consensus.yaml").write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "defaults:",
                         "  run_root: configured-runs",
                         "participants:",
@@ -1336,6 +1350,16 @@ class ConsensusToolTests(unittest.TestCase):
                         "  reviewers:",
                         "    - reviewer-project",
                         "  human_supervisor: none",
+                        "participant_identities:",
+                        "  orchestrator-project:",
+                        "    participant_profile_id: orchestrator-default",
+                        "    execution_profile_id: manual-default",
+                        "  author-project:",
+                        "    participant_profile_id: author-default",
+                        "    execution_profile_id: manual-default",
+                        "  reviewer-project:",
+                        "    participant_profile_id: reviewer-default",
+                        "    execution_profile_id: manual-default",
                     ]
                 ),
                 encoding="utf-8",
@@ -1363,12 +1387,19 @@ class ConsensusToolTests(unittest.TestCase):
             (project / ".cross-agent-consensus.yaml").write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "participants:",
                         "  orchestrator: orchestrator-project",
                         "  author: author-project",
                         "  reviewers:",
                         "    - reviewer-project",
+                        "participant_identities:",
+                        "  orchestrator-project:",
+                        "    participant_profile_id: orchestrator-default",
+                        "    execution_profile_id: manual-default",
+                        "  author-project:",
+                        "    participant_profile_id: author-default",
+                        "    execution_profile_id: manual-default",
                     ]
                 ),
                 encoding="utf-8",
@@ -1418,7 +1449,7 @@ class ConsensusToolTests(unittest.TestCase):
             (project / ".cross-agent-consensus.yaml").write_text(
                 "\n".join(
                     [
-                        "schema_version: cross-agent-consensus-config-1",
+                        "schema_version: cross-agent-consensus-config-2",
                         "participants:",
                         "  orchestrator: orchestrator-project",
                         "  author: author-project",
@@ -1442,6 +1473,16 @@ class ConsensusToolTests(unittest.TestCase):
                         "    author: author-task",
                         "    reviewers:",
                         "      - reviewer-task",
+                        "  participant_identities:",
+                        "    orchestrator-task:",
+                        "      participant_profile_id: orchestrator-default",
+                        "      execution_profile_id: manual-default",
+                        "    author-task:",
+                        "      participant_profile_id: author-default",
+                        "      execution_profile_id: manual-default",
+                        "    reviewer-task:",
+                        "      participant_profile_id: reviewer-default",
+                        "      execution_profile_id: manual-default",
                     ]
                 ),
                 encoding="utf-8",
@@ -1474,6 +1515,16 @@ class ConsensusToolTests(unittest.TestCase):
                         "    author: author-task",
                         "    reviewers:",
                         "      - reviewer-task",
+                        "  participant_identities:",
+                        "    orchestrator-task:",
+                        "      participant_profile_id: orchestrator-default",
+                        "      execution_profile_id: manual-default",
+                        "    author-task:",
+                        "      participant_profile_id: author-default",
+                        "      execution_profile_id: manual-default",
+                        "    reviewer-task:",
+                        "      participant_profile_id: reviewer-default",
+                        "      execution_profile_id: manual-default",
                         "  invocation:",
                         "    unattended_invocation:",
                         "      enabled: true",
@@ -1503,6 +1554,16 @@ class ConsensusToolTests(unittest.TestCase):
                         "    author: author-task",
                         "    reviewers:",
                         "      - reviewer-task",
+                        "  participant_identities:",
+                        "    orchestrator-task:",
+                        "      participant_profile_id: orchestrator-default",
+                        "      execution_profile_id: manual-default",
+                        "    author-task:",
+                        "      participant_profile_id: author-default",
+                        "      execution_profile_id: manual-default",
+                        "    reviewer-task:",
+                        "      participant_profile_id: reviewer-default",
+                        "      execution_profile_id: manual-default",
                         "  invocation:",
                         "    unattended_invocation:",
                         "      enabled: true",
@@ -1826,7 +1887,7 @@ class ConsensusToolTests(unittest.TestCase):
             )
             result = self.run_cli("validate", "--run", str(run), "--records")
             self.assertEqual(result.returncode, 2)
-            self.assertIn("earlier than conclusion-validation output", result.stdout)
+            self.assertIn("is not after conclusion-validation output", result.stdout)
 
     def test_response_skeleton_waits_for_every_expected_conclusion_validation_reviewer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -3017,6 +3078,72 @@ class ConsensusToolTests(unittest.TestCase):
             )
             result = self.run_cli("validate", "--run", str(run), "--terminal")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_terminate_refuses_stale_or_branched_artifact_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            stale_run = self.init_run(tmp / "stale")
+            result = self.run_cli(
+                "new-artifact",
+                "--run",
+                str(stale_run),
+                "--artifact-version",
+                "v2",
+                "--predecessor",
+                "v1",
+                "--content-locator",
+                "README.md",
+                "--produced-by",
+                "author-codex",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+            result = self.run_cli(
+                "terminate",
+                "--run",
+                str(stale_run),
+                "--terminal-condition",
+                "consensus_reached",
+                "--final-artifact-version",
+                "v1",
+                "--reason",
+                "A stale final ArtifactVersion must be rejected.",
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("must be the unique ArtifactVersion chain head", result.stderr)
+            self.assertFalse((stale_run / "report.md").exists())
+
+            branch_run = self.init_run(tmp / "branch")
+            for artifact_version in ("v2", "v3"):
+                result = self.run_cli(
+                    "new-artifact",
+                    "--run",
+                    str(branch_run),
+                    "--artifact-version",
+                    artifact_version,
+                    "--predecessor",
+                    "v1",
+                    "--content-locator",
+                    "README.md",
+                    "--produced-by",
+                    "author-codex",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+            result = self.run_cli(
+                "terminate",
+                "--run",
+                str(branch_run),
+                "--terminal-condition",
+                "consensus_reached",
+                "--final-artifact-version",
+                "v2",
+                "--reason",
+                "A branched ArtifactVersion chain must be rejected.",
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("predecessor v1 has branches v2, v3", result.stdout)
+            self.assertFalse((branch_run / "report.md").exists())
 
     def test_terminate_refuses_invalid_waived_validator_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

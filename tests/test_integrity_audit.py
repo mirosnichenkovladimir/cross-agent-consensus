@@ -38,6 +38,7 @@ from cross_agent_consensus.run_audit import (
     append_run_event_locked,
     derive_run_phase,
     exclusive_file_lock,
+    journal_phase_matches_records,
     read_run_events,
     run_event_messages,
 )
@@ -686,6 +687,62 @@ class IntegrityTests(unittest.TestCase):
 
 
 class RunAuditTests(unittest.TestCase):
+    def test_0_12_rereview_phase_matches_0_13_resolved_phase(self) -> None:
+        self.assertTrue(
+            journal_phase_matches_records((0, 12, 0), "awaiting_rereview", "ready_for_termination")
+        )
+        self.assertTrue(
+            journal_phase_matches_records((0, 12, 9), "awaiting_rereview", "awaiting_validation")
+        )
+        self.assertFalse(
+            journal_phase_matches_records((0, 13, 0), "awaiting_rereview", "ready_for_termination")
+        )
+
+    def test_0_12_journal_records_compatibility_transition_on_next_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name) / "continued-run"
+            run.mkdir()
+            (run / "run.md").write_text(
+                "- `cross_agent_consensus_version`: `0.12.0`\n",
+                encoding="utf-8",
+            )
+            append_run_event_locked(
+                run,
+                "run_initialized",
+                actor_identity="orchestrator",
+                phase_before="not_initialized",
+                phase_after="awaiting_review",
+            )
+            append_run_event_locked(
+                run,
+                "review_captured",
+                actor_identity="orchestrator",
+                phase_before="awaiting_review",
+                phase_after="awaiting_author_response",
+            )
+            append_run_event_locked(
+                run,
+                "author_response_recorded",
+                actor_identity="orchestrator",
+                phase_before="awaiting_author_response",
+                phase_after="awaiting_rereview",
+            )
+            append_run_event_locked(
+                run,
+                "compatibility_probe",
+                actor_identity="orchestrator",
+                phase_before="ready_for_termination",
+                phase_after="ready_for_termination",
+            )
+
+            events = read_run_events(run)
+            messages = run_event_messages(run)
+
+        self.assertEqual(events[3]["phase_before"], "awaiting_rereview")
+        self.assertEqual(events[3]["phase_after"], "ready_for_termination")
+        self.assertFalse(any("does not match previous phase_after" in message for message in messages))
+        self.assertFalse(any("invalid run phase transition" in message for message in messages))
+
     def test_parallel_init_allocates_distinct_run_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
@@ -842,7 +899,7 @@ class RunAuditTests(unittest.TestCase):
             run_md = run / "run.md"
             run_md.write_text(
                 run_md.read_text(encoding="utf-8").replace(
-                    "- `cross_agent_consensus_version`: `0.12.0`",
+                    "- `cross_agent_consensus_version`: `0.13.0`",
                     "- `cross_agent_consensus_version`: `0.9.2`",
                 ),
                 encoding="utf-8",

@@ -8,6 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from cross_agent_consensus.io import read_json_file, slugify
+from cross_agent_consensus.lifecycle import (
+    artifact_chain,
+    current_artifact_version_id,
+    effective_blocking_finding_ids,
+    latest_rereview_decisions,
+    protocol_timestamp,
+    record_chronology_key,
+    record_follows,
+)
 from cross_agent_consensus.integrity import artifact_integrity_messages, integrity_messages, live_session_messages
 from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
@@ -46,7 +55,6 @@ from cross_agent_consensus.link_validation import collect_link_messages
 from cross_agent_consensus.run_audit import recorded_run_version, run_event_messages
 from cross_agent_consensus.invocation.session_paths import safe_actor_component
 
-RESOLVING_REREVIEW_DECISIONS = {"verified", "rejection_accepted"}
 UNRESOLVED_REREVIEW_DECISIONS = {"still_valid", "disputed", "needs_human"}
 PLACEHOLDER_RE = re.compile(r"^<[^<>\n]+>$")
 
@@ -190,13 +198,19 @@ def conclusion_validation_ordering_messages(records: list[Record]) -> list[str]:
                     f"for ReviewBatch {batch_id}{missing_text}"
                 )
             continue
-        latest_output_time = max(str(record.data.get("created_at")) for record in raw_outputs)
+        latest_output = max(
+            raw_outputs,
+            key=lambda record: record_chronology_key(records, record) or (
+                protocol_timestamp("0001-01-01T00:00:00Z"),
+                -1,
+            ),
+        )
         for response in responses:
-            response_time = str(response.data.get("created_at"))
-            if response_time < latest_output_time:
+            if not record_follows(records, response, latest_output):
                 messages.append(
-                    f"{response.path}:{response.heading_line}: AuthorResponse created_at {response_time} is earlier "
-                    f"than conclusion-validation output {latest_output_time} for ReviewBatch {batch_id}"
+                    f"{response.path}:{response.heading_line}: AuthorResponse created_at "
+                    f"{response.data.get('created_at')} is not after conclusion-validation output "
+                    f"{latest_output.data.get('created_at')} for ReviewBatch {batch_id}"
                 )
     return messages
 
@@ -328,6 +342,11 @@ def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult
         for field in COMMON_FIELDS:
             if required_field_missing(record.data, field):
                 messages.append(f"{record.path}:{record.heading_line}: missing common field {field}")
+        if not required_field_missing(record.data, "created_at"):
+            try:
+                protocol_timestamp(record.data.get("created_at"))
+            except ValueError as exc:
+                messages.append(f"{record.path}:{record.heading_line}: created_at {exc}")
         if record.data.get("schema_version") not in SUPPORTED_RECORD_SCHEMA_VERSIONS:
             messages.append(
                 f"{record.path}:{record.heading_line}: schema_version must be one of "
@@ -378,6 +397,7 @@ def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult
                 messages.append(f"{record.path}:{record.heading_line}: waived validator missing authority")
             if record.data.get("waiver_rationale_or_null") is None:
                 messages.append(f"{record.path}:{record.heading_line}: waived validator missing rationale")
+    messages.extend(artifact_chain(records).blockers)
     messages.extend(conclusion_validation_ordering_messages(records))
     ok = not messages
     return CheckResult(ok, (warnings + messages) or ["record checks passed"])
@@ -491,8 +511,13 @@ def required_validators(records: list[Record]) -> list[str]:
 
 
 def validator_status(records: list[Record]) -> dict[str, str]:
+    target_artifact_version_id = current_artifact_version_id(records)
+    if target_artifact_version_id is None:
+        return {}
     status: dict[str, str] = {}
     for record in records_by_type(records, "ValidationEvidence"):
+        if record.data.get("target_artifact_version_id") != target_artifact_version_id:
+            continue
         validator = record.data.get("validator_id")
         result = record.data.get("result")
         if validator and result:
@@ -501,127 +526,30 @@ def validator_status(records: list[Record]) -> dict[str, str]:
 
 
 def latest_validator_evidence(records: list[Record]) -> dict[str, Record]:
+    target_artifact_version_id = current_artifact_version_id(records)
+    if target_artifact_version_id is None:
+        return {}
     latest: dict[str, Record] = {}
     for record in records_by_type(records, "ValidationEvidence"):
+        if record.data.get("target_artifact_version_id") != target_artifact_version_id:
+            continue
         validator = record.data.get("validator_id")
         if validator:
             latest[str(validator)] = record
     return latest
 
 
-def _rereview_decisions_by_batch(records: list[Record]) -> dict[tuple[str, str, str], str]:
-    """Return the latest decision for each finding, batch, and reviewer."""
-
-    latest: dict[tuple[str, str, str], str] = {}
-    for record in records_by_type(records, "ReReviewDecision"):
-        finding_id = record.data.get("normalized_finding_id")
-        batch_id = record.data.get("review_batch_id") or "__legacy_rereview_batch__"
-        reviewer_identity = record.data.get("reviewer_identity")
-        decision = record.data.get("decision")
-        if finding_id and reviewer_identity and decision:
-            latest[(str(finding_id), str(batch_id), str(reviewer_identity))] = str(decision)
-    return latest
-
-
-def _latest_rereview_batch_decisions(
-    records: list[Record],
-) -> dict[str, tuple[str, set[str], dict[str, str]]]:
-    decisions = _rereview_decisions_by_batch(records)
-    batch_records = {
-        str(record.data.get("review_batch_id")): record
-        for record in records_by_type(records, "ReviewBatch")
-        if record.data.get("review_batch_id")
-    }
-    batch_order = {batch_id: index for index, batch_id in enumerate(batch_records)}
-    fallback_order: dict[str, int] = {}
-    for record in records_by_type(records, "ReReviewDecision"):
-        batch_id = str(record.data.get("review_batch_id") or "__legacy_rereview_batch__")
-        if batch_id not in fallback_order:
-            fallback_order[batch_id] = len(fallback_order)
-
-    decision_batches_by_finding: dict[str, set[str]] = {}
-    for finding_id, batch_id, _reviewer in decisions:
-        decision_batches_by_finding.setdefault(finding_id, set()).add(batch_id)
-
-    applicable_batches_by_finding: dict[str, list[str]] = {}
-    for batch_id, batch_record in batch_records.items():
-        for finding_id in batch_record.data.get("source_finding_ids") or []:
-            applicable_batches_by_finding.setdefault(str(finding_id), []).append(batch_id)
-
-    latest_by_finding: dict[str, tuple[str, set[str], dict[str, str]]] = {}
-    finding_ids = set(decision_batches_by_finding) | set(applicable_batches_by_finding)
-    for finding_id in finding_ids:
-        applicable_batch_ids = applicable_batches_by_finding.get(finding_id, [])
-        if applicable_batch_ids:
-            latest_batch_id = applicable_batch_ids[-1]
-        else:
-            latest_batch_id = max(
-                decision_batches_by_finding[finding_id],
-                key=lambda batch_id: (
-                    batch_id in batch_order,
-                    batch_order.get(batch_id, fallback_order.get(batch_id, -1)),
-                ),
-            )
-        batch_decisions = {
-            reviewer: decision
-            for (decision_finding_id, batch_id, reviewer), decision in decisions.items()
-            if decision_finding_id == finding_id and batch_id == latest_batch_id
-        }
-        selected_batch = batch_records.get(latest_batch_id)
-        expected_reviewers = expected_reviewers_for_batch(records, selected_batch) if selected_batch else set()
-        if not expected_reviewers:
-            expected_reviewers = set(batch_decisions)
-        latest_by_finding[finding_id] = (latest_batch_id, expected_reviewers, batch_decisions)
-    return latest_by_finding
-
-
-def latest_rereview_decisions(records: list[Record]) -> dict[tuple[str, str], str]:
-    """Return reviewer decisions from each finding's latest ReviewBatch."""
-
-    return {
-        (finding_id, reviewer): decision
-        for finding_id, (_batch_id, _expected, decisions) in _latest_rereview_batch_decisions(records).items()
-        for reviewer, decision in decisions.items()
-    }
-
-
 def unresolved_blockers(records: list[Record]) -> list[str]:
-    unresolved: list[str] = []
-    resolved_states = {"resolved", "verified", "rejection_accepted", "closed"}
-    latest_batches = _latest_rereview_batch_decisions(records)
-    for record in records_by_type(records, "NormalizedFinding"):
-        data = record.data
-        finding_id = str(data.get("normalized_finding_id"))
-        in_scope = data.get("scope_classification") == "in_scope"
-        blocking = data.get("blocking_status") in {"blocking", "promoted_by_human"}
-        material = data.get("materiality") == "material" or data.get("materiality_status") in {
-            "undisputed",
-            "disputed_materiality",
-        }
-        lifecycle = data.get("lifecycle_state")
-        latest_batch = latest_batches.get(finding_id)
-        expected_reviewers = latest_batch[1] if latest_batch else set()
-        reviewer_decisions = latest_batch[2] if latest_batch else {}
-        current_decisions = [reviewer_decisions[reviewer] for reviewer in expected_reviewers if reviewer in reviewer_decisions]
-        complete_rereview_batch = bool(expected_reviewers) and expected_reviewers <= reviewer_decisions.keys()
-        unanimous_rereview_resolution = (
-            complete_rereview_batch
-            and len(set(current_decisions)) == 1
-            and current_decisions[0] in RESOLVING_REREVIEW_DECISIONS
-        )
-        unresolved_rereview = bool(latest_batch) and not unanimous_rereview_resolution
-        lifecycle_resolved = lifecycle in resolved_states and not unresolved_rereview
-        if in_scope and blocking and material and not lifecycle_resolved and not unanimous_rereview_resolution:
-            unresolved.append(finding_id)
-    return unresolved
+    return sorted(effective_blocking_finding_ids(records))
 
 
 def unresolved_needs_human(records: list[Record]) -> list[str]:
+    effective_blockers = effective_blocking_finding_ids(records)
     return sorted(
         {
             finding_id
             for (finding_id, _), decision in latest_rereview_decisions(records).items()
-            if decision == "needs_human"
+            if decision == "needs_human" and finding_id in effective_blockers
         }
     )
 
@@ -733,10 +661,28 @@ def check_terminal_records(
         ):
             messages.append("TerminationRecord and FinalReport final_artifact_version_id_or_null differ")
     terminal_condition = termination.data.get("terminal_condition") if termination else None
+    chain = artifact_chain(records)
+    messages.extend(chain.blockers)
+    head_id = (
+        str(chain.head.data.get("artifact_version_id") or chain.head.record_id)
+        if chain.head is not None
+        else None
+    )
+    final_artifact_id = (
+        termination.data.get("final_artifact_version_id_or_null") if termination else None
+    )
+    if final_artifact_id is not None and final_artifact_id != head_id:
+        messages.append(
+            f"final ArtifactVersion must be the unique chain head: expected {head_id or 'none'}, got {final_artifact_id}"
+        )
     if terminal_condition in {"consensus_reached", "round_limit_reached"}:
         messages.extend(reviewer_cli_invocation_messages(run, records))
     status = validator_status(records)
     if terminal_condition == "consensus_reached":
+        if head_id is None:
+            messages.append("consensus_reached requires one valid ArtifactVersion chain head")
+        if final_artifact_id is None:
+            messages.append("consensus_reached requires final_artifact_version_id_or_null to name the chain head")
         required = required_validators(records)
         latest = latest_validator_evidence(records)
         for validator in required:

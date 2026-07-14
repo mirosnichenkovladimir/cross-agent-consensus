@@ -28,6 +28,7 @@ from cross_agent_consensus.io import (
 )
 from cross_agent_consensus.integrity import content_locator_base
 from cross_agent_consensus.init import build_init_files
+from cross_agent_consensus.lifecycle import artifact_chain
 from cross_agent_consensus.normalize import cmd_normalize
 from cross_agent_consensus.record_schema import ENUMS
 from cross_agent_consensus.report import cmd_report
@@ -53,6 +54,10 @@ from cross_agent_consensus.models import (
     CheckResult,
     ConfigResolution,
     PromptCommandInput,
+)
+from cross_agent_consensus.next_action import (
+    derive_next_action_plan,
+    next_action_plan_json,
 )
 from cross_agent_consensus.markdown_records import (
     frontmatter,
@@ -321,6 +326,43 @@ def cmd_status(args: argparse.Namespace) -> int:
     for message in result.messages:
         print(f"    {message}")
     return 0
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    """Print the deterministic next action without mutating the run."""
+
+    plan = derive_next_action_plan(Path(args.run))
+    if args.json:
+        print(next_action_plan_json(plan), end="")
+    else:
+        print(f"Run: {plan.run_id}")
+        print(f"Phase: {plan.phase}")
+        print(f"Plan status: {plan.plan_status}")
+        print(f"Terminal status: {plan.terminal_status}")
+        print("Runnable actions:")
+        for action in plan.runnable_actions:
+            print(f"  - {action}")
+        if not plan.runnable_actions:
+            print("  - none")
+        print("Blockers:")
+        for blocker in plan.blockers:
+            print(f"  - {blocker}")
+        if not plan.blockers:
+            print("  - none")
+        print("Required records:")
+        for record in plan.required_records:
+            print(f"  - {record}")
+        if not plan.required_records:
+            print("  - none")
+        print("Pending checkpoints:")
+        for checkpoint in plan.pending_checkpoints:
+            print(f"  - {checkpoint.checkpoint_id} ({checkpoint.checkpoint_type})")
+            for choice in checkpoint.choices:
+                print(f"    - {choice.choice_id}: {choice.consequence}")
+        if not plan.pending_checkpoints:
+            print("  - none")
+        print(f"Protocol records and RunJournal SHA-256: {plan.record_journal_sha256}")
+    return 2 if plan.plan_status == "invalid" else 0
 
 
 def config_command_resolution(args: argparse.Namespace, *, strict: bool) -> tuple[ConfigResolution, dict[str, Any]]:
@@ -899,9 +941,24 @@ def cmd_terminate(args: argparse.Namespace) -> int:
         if not result.ok:
             print_check(name, result)
             return 2
+    chain = artifact_chain(records)
+    if chain.blockers:
+        print_check("artifact-chain", CheckResult.fail(list(chain.blockers)))
+        return 2
+    chain_head_id = (
+        str(chain.head.data.get("artifact_version_id") or chain.head.record_id)
+        if chain.head is not None
+        else None
+    )
     artifact_ids = {record.data.get("artifact_version_id") for record in records_by_type(records, "ArtifactVersion")}
     if args.final_artifact_version and args.final_artifact_version not in artifact_ids:
         eprint(f"error: final artifact version not found: {args.final_artifact_version}")
+        return 2
+    if args.final_artifact_version and args.final_artifact_version != chain_head_id:
+        eprint(
+            "error: final artifact version must be the unique ArtifactVersion chain head: "
+            f"expected {chain_head_id or 'none'}, got {args.final_artifact_version}"
+        )
         return 2
     path = run / REPORT_FILENAME
     body = terminal_body(run, args.terminal_condition, args.final_artifact_version, args.reason, records)
@@ -1004,6 +1061,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="Show current run state without modifying it.")
     add_common_run_arg(status)
     status.set_defaults(func=cmd_status)
+
+    next_action = sub.add_parser("next", help="Derive the next runnable CAC action without modifying the run.")
+    add_common_run_arg(next_action)
+    next_action.add_argument("--json", action="store_true", help="Print byte-stable NextActionPlan JSON.")
+    next_action.set_defaults(func=cmd_next)
 
     validate = sub.add_parser("validate", help="Run deterministic conformance checks.")
     add_common_run_arg(validate)

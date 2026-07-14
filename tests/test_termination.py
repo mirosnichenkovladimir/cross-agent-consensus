@@ -23,6 +23,13 @@ class TerminationTests(unittest.TestCase):
             "Done.",
             [
                 Record(
+                    "ArtifactVersion",
+                    "v1",
+                    Path("artifacts/v1.md"),
+                    1,
+                    {"artifact_version_id": "v1", "predecessor_id_or_null": None},
+                ),
+                Record(
                     "RawFinding",
                     "raw-finding-001",
                     Path("rounds/round-001/reviews/codex.md"),
@@ -63,7 +70,7 @@ class TerminationTests(unittest.TestCase):
                     "validation",
                     Path("validation.md"),
                     1,
-                    {"validator_id": "smoke", "result": "pass"},
+                    {"validator_id": "smoke", "target_artifact_version_id": "v1", "result": "pass"},
                 )
             ],
         )
@@ -113,6 +120,13 @@ class TerminationTests(unittest.TestCase):
             },
         )
         records = [
+            Record(
+                "ArtifactVersion",
+                "v1",
+                Path("artifacts/v1.md"),
+                1,
+                {"artifact_version_id": "v1", "predecessor_id_or_null": None},
+            ),
             Record(
                 "Policy",
                 "policy",

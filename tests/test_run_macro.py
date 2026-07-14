@@ -346,6 +346,27 @@ class DryRunTests(unittest.TestCase):
         self.assertIn("codex", stdout)
         self.assertIn("claude", stdout)
 
+    def test_selected_reviewer_finalizes_every_fresh_batch_prompt_before_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _stage_run(Path(tmp_name), reviewers=["codex", "claude"])
+            prompt_dir = round_dir(run, "round-1") / "prompts" / "reviewers"
+            for prompt in prompt_dir.glob("*.md"):
+                prompt.unlink()
+            _append_config_resolution(
+                run,
+                {
+                    "codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
+                    "claude": ["claude", "-p", "--verbose", "--output-format", "stream-json"],
+                },
+            )
+
+            rc, stdout, stderr = _capture_run(_run_args(run, actors="codex"))
+
+            self.assertEqual(rc, 0, stderr + stdout)
+            self.assertTrue((prompt_dir / "codex.md").is_file())
+            self.assertTrue((prompt_dir / "claude.md").is_file())
+            self.assertIn("resolved actors for phase=reviewer round=round-1: codex", stdout)
+
     def test_dry_run_with_missing_runtime_command_exits_3(self) -> None:
         """No runtime command for an actor → readiness blocker → dry-run exits 3."""
         with tempfile.TemporaryDirectory() as tmp_name:

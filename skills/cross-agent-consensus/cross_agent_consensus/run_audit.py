@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, Iterator, ParamSpec
 
 from cross_agent_consensus.io import append_jsonl, atomic_write_json, read_json_file, sha256_file, utc_now
+from cross_agent_consensus.lifecycle import (
+    current_artifact_version_id,
+    current_author_response_finding_ids,
+    effective_blocking_finding_ids,
+)
 from cross_agent_consensus.models import Record
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
 
@@ -108,20 +113,7 @@ def _expected_reviewers(records: list[Record], batch: Record) -> set[str]:
 
 
 def _blocking_finding_ids(records: list[Record]) -> set[str]:
-    resolved_states = {"resolved", "verified", "rejection_accepted", "closed"}
-    blockers: set[str] = set()
-    for record in records_by_type(records, "NormalizedFinding"):
-        data = record.data
-        if data.get("scope_classification") != "in_scope":
-            continue
-        if data.get("blocking_status") not in {"blocking", "promoted_by_human"}:
-            continue
-        if data.get("materiality") == "non_material" or data.get("lifecycle_state") in resolved_states:
-            continue
-        finding_id = data.get("normalized_finding_id")
-        if finding_id:
-            blockers.add(str(finding_id))
-    return blockers
+    return effective_blocking_finding_ids(records)
 
 
 def derive_run_phase(records: list[Record]) -> str:
@@ -137,36 +129,34 @@ def derive_run_phase(records: list[Record]) -> str:
     if batch is None:
         return "awaiting_review"
     batch_id = str(batch.data.get("review_batch_id") or "")
-    expected_reviewers = _expected_reviewers(records, batch)
-    captured_reviewers = {
-        str(record.data.get("reviewer_identity"))
-        for record in records_by_type(records, "RawReviewerOutput")
-        if str(record.data.get("review_batch_id") or "") == batch_id
-    }
-    if expected_reviewers and not expected_reviewers <= captured_reviewers:
-        return "awaiting_review"
-    if not captured_reviewers:
-        return "awaiting_review"
+    if batch.data.get("review_mode") != "remediation_verification":
+        expected_reviewers = _expected_reviewers(records, batch)
+        captured_reviewers = {
+            str(record.data.get("reviewer_identity"))
+            for record in records_by_type(records, "RawReviewerOutput")
+            if str(record.data.get("review_batch_id") or "") == batch_id
+        }
+        if expected_reviewers and not expected_reviewers <= captured_reviewers:
+            return "awaiting_review"
+        if not captured_reviewers:
+            return "awaiting_review"
 
-    batch_raw_ids = {
-        str(record.data.get("raw_finding_id"))
-        for record in records_by_type(records, "RawFinding")
-        if str(record.data.get("review_batch_id") or "") == batch_id
-    }
-    normalized_raw_ids = {
-        str(raw_id)
-        for record in records_by_type(records, "NormalizationRecord")
-        for raw_id in (record.data.get("source_raw_finding_ids") or [])
-    }
-    if batch_raw_ids - normalized_raw_ids:
-        return "awaiting_normalization"
+        batch_raw_ids = {
+            str(record.data.get("raw_finding_id"))
+            for record in records_by_type(records, "RawFinding")
+            if str(record.data.get("review_batch_id") or "") == batch_id
+        }
+        normalized_raw_ids = {
+            str(raw_id)
+            for record in records_by_type(records, "NormalizationRecord")
+            for raw_id in (record.data.get("source_raw_finding_ids") or [])
+        }
+        if batch_raw_ids - normalized_raw_ids:
+            return "awaiting_normalization"
 
     blockers = _blocking_finding_ids(records)
     if blockers:
-        responded = {
-            str(record.data.get("normalized_finding_id"))
-            for record in records_by_type(records, "AuthorResponse")
-        }
+        responded = current_author_response_finding_ids(records)
         if blockers - responded:
             return "awaiting_author_response"
         return "awaiting_rereview"
@@ -176,8 +166,14 @@ def derive_run_phase(records: list[Record]) -> str:
         str(value)
         for value in ((policy.data.get("required_validator_ids") if policy else None) or [])
     }
+    target_artifact_version_id = current_artifact_version_id(records)
     validator_results: dict[str, str] = {}
     for record in records_by_type(records, "ValidationEvidence"):
+        if (
+            target_artifact_version_id is not None
+            and record.data.get("target_artifact_version_id") != target_artifact_version_id
+        ):
+            continue
         validator = record.data.get("validator_id")
         result = record.data.get("result")
         if validator and result:
@@ -242,6 +238,23 @@ def run_requires_event_integrity_v2(run: Path) -> bool:
     return any(event.get("schema_version") == RUN_EVENT_SCHEMA for event in read_run_events(run))
 
 
+def journal_phase_matches_records(
+    run_version: tuple[int, int, int] | None,
+    journal_phase: Any,
+    derived_phase: str,
+) -> bool:
+    """Accept the one phase reinterpretation introduced by CAC 0.13.0."""
+
+    if journal_phase == derived_phase:
+        return True
+    return (
+        run_version is not None
+        and run_version < (0, 13, 0)
+        and journal_phase == "awaiting_rereview"
+        and derived_phase in {"awaiting_validation", "ready_for_termination"}
+    )
+
+
 def _write_event_anchor(run: Path, event: dict[str, Any]) -> None:
     path = run / RUN_EVENTS_FILENAME
     atomic_write_json(
@@ -269,6 +282,11 @@ def append_run_event_locked(
 
     path = run / RUN_EVENTS_FILENAME
     requires_v2 = run_requires_event_integrity_v2(run)
+    previous_events = read_run_events(run)
+    if previous_events:
+        preceding_phase = previous_events[-1].get("phase_after")
+        if isinstance(preceding_phase, str):
+            phase_before = str(preceding_phase)
     if _event_count(path) == 0 and event_type != "run_initialized" and requires_v2:
         initial_event: dict[str, Any] = {
             "schema_version": RUN_EVENT_SCHEMA,
@@ -285,6 +303,7 @@ def append_run_event_locked(
         initial_event["event_sha256"] = _event_sha256(initial_event)
         append_jsonl(path, initial_event)
         _write_event_anchor(run, initial_event)
+        previous_events = [initial_event]
     sequence = _event_count(path) + 1
     event: dict[str, Any] = {
         "schema_version": (
@@ -302,8 +321,9 @@ def append_run_event_locked(
         "details": details or {},
     }
     if event["schema_version"] == RUN_EVENT_SCHEMA:
-        previous = read_run_events(run)
-        event["previous_event_sha256_or_null"] = previous[-1].get("event_sha256") if previous else None
+        event["previous_event_sha256_or_null"] = (
+            previous_events[-1].get("event_sha256") if previous_events else None
+        )
         event["event_sha256"] = _event_sha256(event)
     append_jsonl(path, event)
     if event["schema_version"] == RUN_EVENT_SCHEMA:
@@ -345,15 +365,20 @@ def locked_run_command(
                 records_before = parse_run_records(run) if run.exists() else []
                 phase_before = derive_run_phase(records_before)
                 return_code = function(*function_args, **function_kwargs)
-                if return_code == 0:
-                    records_after = parse_run_records(run)
+                records_after = parse_run_records(run)
+                records_changed = records_after != records_before
+                if return_code == 0 or records_changed:
+                    details = command_event_details(args)
+                    if return_code != 0:
+                        details["command_return_code"] = return_code
+                        details["protocol_records_changed_on_nonzero_exit"] = True
                     append_run_event_locked(
                         run,
-                        event_type,
+                        event_type if return_code == 0 else f"{event_type}_protocol_mutation",
                         actor_identity=str(getattr(args, "actor", None) or "orchestrator-consensus-tool"),
                         phase_before=phase_before,
                         phase_after=derive_run_phase(records_after),
-                        details=command_event_details(args),
+                        details=details,
                     )
                 return return_code
 
@@ -470,9 +495,11 @@ def run_event_messages(run: Path) -> list[str]:
             messages.append(f"{RUN_EVENT_ANCHOR_FILENAME}: events.jsonl sha256 mismatch")
 
     final_phase = derive_run_phase(parse_run_records(run))
-    if valid_events[-1].get("phase_after") != final_phase:
+    recorded_phase = valid_events[-1].get("phase_after")
+    run_version = recorded_run_version(run)
+    if not journal_phase_matches_records(run_version, recorded_phase, final_phase):
         messages.append(
             "events.jsonl: final phase_after does not match protocol records: "
-            f"{valid_events[-1].get('phase_after')!r} != {final_phase!r}"
+            f"{recorded_phase!r} != {final_phase!r}"
         )
     return messages

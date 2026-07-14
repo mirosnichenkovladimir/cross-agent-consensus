@@ -16,8 +16,7 @@ from cross_agent_consensus.profiles import parse_profile_definitions, resolved_p
 
 
 CONFIG_SCHEMA_VERSION = "cross-agent-consensus-config-2"
-LEGACY_CONFIG_SCHEMA_VERSION = "cross-agent-consensus-config-1"
-SUPPORTED_CONFIG_SCHEMA_VERSIONS = {LEGACY_CONFIG_SCHEMA_VERSION, CONFIG_SCHEMA_VERSION}
+SUPPORTED_CONFIG_SCHEMA_VERSIONS = {CONFIG_SCHEMA_VERSION}
 TASK_SCHEMA_VERSION = "cross-agent-consensus-task-1"
 CAC_VERSION = read_cac_version()
 PEEK_CONFIG_DEFAULTS = {
@@ -90,9 +89,6 @@ def canonical_config(data: dict[str, Any]) -> dict[str, Any]:
         set_nested(result, "defaults.profile", result.pop("profile"))
     if "round_limits" in result:
         set_nested(result, "defaults.round_limits", result.pop("round_limits"))
-    if result.get("schema_version") == LEGACY_CONFIG_SCHEMA_VERSION:
-        _translate_legacy_participants(result)
-    _translate_legacy_reviewer_clis(result)
     return result
 
 
@@ -126,6 +122,8 @@ def _translate_legacy_participants(result: dict[str, Any]) -> None:
 
 
 def legacy_adapter_for_command(command: list[str]) -> tuple[str, str]:
+    """Classify argv stored by a pre-profile ConfigResolution record."""
+
     executable = Path(command[0]).name if command else ""
     if executable == "codex":
         return "codex-cli", "stream_json" if "--json" in command else "raw_stdout"
@@ -136,43 +134,6 @@ def legacy_adapter_for_command(command: list[str]) -> tuple[str, str]:
         )
         return "claude-cli", "stream_json" if has_stream_json else "raw_stdout"
     return "generic-cli", "raw_stdout"
-
-
-def _translate_legacy_reviewer_clis(result: dict[str, Any]) -> None:
-    reviewer_clis = result.get("reviewer_clis")
-    if not isinstance(reviewer_clis, dict):
-        return
-    profiles = result.setdefault("execution_profiles", {})
-    identities = result.setdefault("participant_identities", {})
-    if not isinstance(profiles, dict) or not isinstance(identities, dict):
-        return
-    for identity, mapping in reviewer_clis.items():
-        if not isinstance(identity, str) or not isinstance(mapping, dict):
-            continue
-        command = mapping.get("command")
-        if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
-            continue
-        profile_id = f"legacy-{re.sub(r'[^a-z0-9._-]+', '-', identity.lower()).strip('-')}-execution"
-        adapter_id, output_mode = legacy_adapter_for_command(command)
-        legacy_env = mapping.get("env") if "env" in mapping else sorted(os.environ)
-        profiles[profile_id] = {
-            "adapter": adapter_id,
-            "command": command,
-            "prompt_transport": mapping.get("prompt_transport", "stdin"),
-            "output_mode": output_mode,
-            "supports_resume": False,
-            "env": legacy_env,
-        }
-        previous = identities.get(identity)
-        participant_profile_id = (
-            previous.get("participant_profile_id")
-            if isinstance(previous, dict)
-            else "reviewer-default"
-        )
-        identities[identity] = {
-            "participant_profile_id": participant_profile_id,
-            "execution_profile_id": profile_id,
-        }
 
 
 def source_record(layer: str, path: Path | None, present: bool, data: dict[str, Any], note: str | None = None) -> dict[str, Any]:
@@ -321,19 +282,15 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
         "participant_profiles",
         "execution_profiles",
         "participant_identities",
-        "reviewer_clis",
         "invocation",
         "feedback",
     }
     schema_version = data.get("schema_version")
     if schema_version not in SUPPORTED_CONFIG_SCHEMA_VERSIONS:
+        errors.append(f"{source}: schema_version must be {CONFIG_SCHEMA_VERSION}")
+    if "reviewer_clis" in data:
         errors.append(
-            f"{source}: schema_version must be one of {', '.join(sorted(SUPPORTED_CONFIG_SCHEMA_VERSIONS))}"
-        )
-    elif schema_version == LEGACY_CONFIG_SCHEMA_VERSION:
-        warnings.append(
-            f"{source}: {LEGACY_CONFIG_SCHEMA_VERSION} is deprecated and accepted only in 0.12.x; "
-            f"migrate to {CONFIG_SCHEMA_VERSION} before 0.13.0"
+            f"{source}: reviewer_clis was removed in 0.13.0; use execution_profiles and participant_identities"
         )
     unknown = sorted(set(data) - allowed_top)
     if unknown:
@@ -384,36 +341,6 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
             value = participants.get(key)
             if value is not None and not isinstance(value, str):
                 errors.append(f"{source}: participants.{key} must be a string")
-    reviewer_clis = data.get("reviewer_clis", {})
-    if reviewer_clis is not None and not isinstance(reviewer_clis, dict):
-        errors.append(f"{source}: reviewer_clis must be a mapping")
-    elif isinstance(reviewer_clis, dict):
-        if reviewer_clis:
-            warnings.append(
-                f"{source}: reviewer_clis is deprecated and accepted only in 0.12.x; use "
-                "execution_profiles and participant_identities before 0.13.0"
-            )
-        for identity, mapping in reviewer_clis.items():
-            if not isinstance(mapping, dict):
-                errors.append(f"{source}: reviewer_clis.{identity} must be a mapping")
-                continue
-            allowed_cli_keys = {"command", "prompt_transport", "stdout_capture", "stderr_capture", "env"}
-            unknown_cli_keys = sorted(set(mapping) - allowed_cli_keys)
-            if unknown_cli_keys:
-                message = f"{source}: reviewer_clis.{identity} unknown keys: {', '.join(unknown_cli_keys)}"
-                (errors if strict else warnings).append(message)
-            command = mapping.get("command")
-            if command is not None and not (isinstance(command, list) and command and all(isinstance(item, str) for item in command)):
-                errors.append(f"{source}: reviewer_clis.{identity}.command must be a non-empty argv list")
-            env = mapping.get("env")
-            if env is not None and not (isinstance(env, list) and all(isinstance(item, str) for item in env)):
-                errors.append(f"{source}: reviewer_clis.{identity}.env must be a list of environment variable names, not values")
-            if mapping.get("prompt_transport", "stdin") != "stdin":
-                errors.append(f"{source}: reviewer_clis.{identity}.prompt_transport v1 supports only stdin")
-            if mapping.get("stdout_capture", "raw_output") != "raw_output":
-                errors.append(f"{source}: reviewer_clis.{identity}.stdout_capture v1 supports only raw_output")
-            if mapping.get("stderr_capture", "raw_error") != "raw_error":
-                errors.append(f"{source}: reviewer_clis.{identity}.stderr_capture v1 supports only raw_error")
     invocation = data.get("invocation", {})
     if invocation is not None and not isinstance(invocation, dict):
         errors.append(f"{source}: invocation must be a mapping")
@@ -477,15 +404,6 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
         errors.extend(secret_messages)
     else:
         warnings.extend(secret_messages)
-    reviewers = get_nested(data, "participants.reviewers", [])
-    cli_keys = set(reviewer_clis) if isinstance(reviewer_clis, dict) else set()
-    if reviewers and cli_keys:
-        unused = sorted(cli_keys - set(reviewers))
-        missing = sorted(set(reviewers) - cli_keys)
-        if unused:
-            warnings.append(f"{source}: reviewer_clis has unused entries: {', '.join(unused)}")
-        if missing:
-            warnings.append(f"{source}: reviewers without CLI mapping fall back to manual handoff: {', '.join(missing)}")
     return warnings, errors
 
 
@@ -505,9 +423,7 @@ def validate_task_file_shape(data: dict[str, Any], *, source: str, strict: bool)
         if not isinstance(data["config"], dict):
             errors.append(f"{source}: config must be a mapping")
         else:
-            config = canonical_config(
-                {"schema_version": LEGACY_CONFIG_SCHEMA_VERSION, **data["config"]}
-            )
+            config = canonical_config({"schema_version": CONFIG_SCHEMA_VERSION, **data["config"]})
             config_warnings, config_errors = validate_config_shape(
                 config,
                 source=f"{source}:config",
@@ -630,9 +546,7 @@ def resolve_config(
                 if not no_config:
                     raw_task_config = raw_task.get("config")
                     task_config: dict[str, Any] = raw_task_config if isinstance(raw_task_config, dict) else {}
-                    config = canonical_config(
-                        {"schema_version": LEGACY_CONFIG_SCHEMA_VERSION, **task_config}
-                    )
+                    config = canonical_config({"schema_version": CONFIG_SCHEMA_VERSION, **task_config})
                     effective = deep_merge_config(effective, {key: value for key, value in config.items() if key != "schema_version"})
                     for field in flatten_values({key: value for key, value in config.items() if key != "schema_version"}):
                         provenance[field] = "task_file"
