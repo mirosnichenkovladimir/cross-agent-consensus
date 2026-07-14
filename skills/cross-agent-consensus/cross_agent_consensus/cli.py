@@ -534,6 +534,29 @@ def setup_config_payload() -> dict[str, Any]:
             "participant_profile_id": "reviewer-default",
             "execution_profile_id": "codex-reviewer-default",
         }
+    if shutil.which("hermes"):
+        reviewers.append("hermes-independent-reviewer")
+        execution_profiles["hermes-reviewer-default"] = {
+            "adapter": "hermes-cli",
+            "command": [
+                "python3",
+                "-m",
+                "cross_agent_consensus.hermes_cli",
+                "--ignore-rules",
+            ],
+            "prompt_transport": "stdin",
+            "output_mode": "stream_json",
+            "supports_resume": True,
+            "env": [
+                "HOME", "PATH", "PYTHONPATH", "TMPDIR", "LANG", "LC_ALL",
+                "HERMES_HOME", "HERMES_INFERENCE_MODEL",
+                "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+            ],
+        }
+        participant_identities["hermes-independent-reviewer"] = {
+            "participant_profile_id": "reviewer-default",
+            "execution_profile_id": "hermes-reviewer-default",
+        }
     data: dict[str, Any] = {
         "schema_version": CONFIG_SCHEMA_VERSION,
         "defaults": {

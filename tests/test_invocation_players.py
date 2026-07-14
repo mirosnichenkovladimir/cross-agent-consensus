@@ -14,6 +14,8 @@ from cross_agent_consensus.invocation.adapters import (
     ClaudeCliPlayer,
     CodexCliPlayer,
     GenericCliPlayer,
+    HermesCliPlayer,
+    detected_hermes_version,
     get_player_adapter,
 )
 from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths
@@ -184,6 +186,55 @@ class InvocationPlayerTests(unittest.TestCase):
                 )
             )
 
+    def test_hermes_provider_session_capture_resume_and_version_detection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            paths = session_paths(Path(tmp_name) / "session-001")
+            paths.session.mkdir()
+            paths.stdout.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "session.started",
+                                "session_id": "hermes-123",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "result",
+                                "result": "FINAL",
+                                "session_id": "hermes-123",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            adapter = HermesCliPlayer()
+            command = [
+                "python3",
+                "-m",
+                "cross_agent_consensus.hermes_cli",
+                "--ignore-rules",
+            ]
+
+            self.assertEqual(adapter.extract_provider_session_id(paths), "hermes-123")
+            self.assertEqual(
+                adapter.build_resume_command(command, "hermes-123"),
+                [*command, "--resume", "hermes-123"],
+            )
+            self.assertEqual(adapter.profile_command_errors(command), [])
+            self.assertTrue(adapter.command_requests_json(command))
+            self.assertTrue(adapter.probe(command).supports_resume)
+            self.assertTrue(
+                adapter.probe(command).supports_session_id_rotation
+            )
+            detected_hermes_version.cache_clear()
+            self.assertTrue(
+                (detected_hermes_version(sys.executable) or "").startswith("Python")
+            )
+
     def test_structured_player_parses_events_and_final_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
@@ -216,17 +267,26 @@ class PlayerAliasTests(unittest.TestCase):
         self.assertIsInstance(get_player_adapter("claude"), ClaudeCliPlayer)
         self.assertIsInstance(get_player_adapter("generic"), GenericCliPlayer)
         self.assertIsInstance(get_player_adapter("deepseek"), GenericCliPlayer)
+        self.assertIsInstance(get_player_adapter("hermes"), HermesCliPlayer)
 
     def test_canonical_player_ids_still_resolve(self) -> None:
         self.assertIsInstance(get_player_adapter("codex-cli"), CodexCliPlayer)
         self.assertIsInstance(get_player_adapter("claude-cli"), ClaudeCliPlayer)
         self.assertIsInstance(get_player_adapter("generic-cli"), GenericCliPlayer)
+        self.assertIsInstance(get_player_adapter("hermes-cli"), HermesCliPlayer)
 
     def test_unknown_player_error_lists_players_and_aliases(self) -> None:
         with self.assertRaises(ValueError) as exc:
             get_player_adapter("nope")
         message = str(exc.exception)
-        for canonical in ("codex-cli", "claude-cli", "manual", "generic-cli", "deepseek-cli"):
+        for canonical in (
+            "codex-cli",
+            "claude-cli",
+            "hermes-cli",
+            "manual",
+            "generic-cli",
+            "deepseek-cli",
+        ):
             self.assertIn(canonical, message)
         for alias, target in PLAYER_ALIASES.items():
             self.assertIn(alias, message)

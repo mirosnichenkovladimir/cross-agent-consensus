@@ -167,6 +167,8 @@ class PlayerCapabilities:
     output_modes: list[str]
     executable_path_or_null: str | None
     resume_conformance_suite_or_null: str | None = None
+    provider_version_or_null: str | None = None
+    supports_session_id_rotation: bool = False
 
 
 @dataclass

@@ -13,6 +13,9 @@ from cross_agent_consensus.integrity import (
     resolved_execution_profile_sha256,
     verified_artifact_sha256,
 )
+from cross_agent_consensus.invocation.adapters import (
+    adapter_allows_provider_session_id_rotation,
+)
 from cross_agent_consensus.io import sha256_file
 from cross_agent_consensus.layout import normalize_round_id
 from cross_agent_consensus.lifecycle import artifact_chain
@@ -453,7 +456,11 @@ def capture_provider_session(
 
     if not invocation.execution_attempt_id:
         raise ValueError("provider session capture requires execution_attempt_id")
-    if invocation.provider_session_id and invocation.provider_session_id != provider_session_id:
+    if (
+        invocation.provider_session_id
+        and invocation.provider_session_id != provider_session_id
+        and not adapter_allows_provider_session_id_rotation(invocation.player_id)
+    ):
         raise ValueError(
             "resumed provider session identifier changed: "
             f"expected {invocation.provider_session_id!r}, received {provider_session_id!r}"

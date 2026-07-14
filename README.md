@@ -28,7 +28,7 @@ Install the manual `cross-agent-consensus` skill package with the terse `cac` in
 ./scripts/install-cac --target all --update
 ```
 
-The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.17.0 adds the opt-in `bounded-remediation` profile: `consensus remediate` maps the current `NextActionPlan` to one checkpoint-bound Author, Reviewer, or Validator transition. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
+The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.18.0 adds a first-class `hermes-cli` connector: the stdin bridge converts Hermes quiet output to JSONL, captures and resumes Hermes session IDs, inherits CAC cancellation, and reports `hermes --version`. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
 
 Trigger examples after install:
 
@@ -100,6 +100,12 @@ Configuration schema `cross-agent-consensus-config-2` separates three names:
 - `ExecutionProfile` defines how CAC invokes it: adapter, argv, optional model and reasoning effort, prompt transport, output mode, resume declaration, and environment-variable allowlist.
 
 `participant_identities` binds each stable Participant Identity to one Participant Profile and one Execution Profile. Switching that binding changes the invocation without renaming the reviewer, author, or validator. `ConfigResolution`, `OperatorApproval`, and `invocation.json` record the selected profile identifiers and effective argv. CAC inserts `model` and `reasoning_effort` into provider-specific argv, includes Participant Profile instructions in finalized prompts below immutable CAC rules, and passes only environment-variable names listed by the Execution Profile. Exact-input approval hashes the complete resolved Execution Profile.
+
+`hermes-reviewer-default` binds the `hermes-cli` adapter to `python3 -m
+cross_agent_consensus.hermes_cli --ignore-rules`. It supports declarative
+`model`, JSONL output, provider-session continuation, process-group
+cancellation, and version detection. Hermes owns authentication and provider
+configuration under its home directory; CAC records no credential values.
 
 Version 0.13.0 accepts only `cross-agent-consensus-config-2`; migrate `reviewer_clis` entries to `execution_profiles` plus `participant_identities` before loading the configuration.
 

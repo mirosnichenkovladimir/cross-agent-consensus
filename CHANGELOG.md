@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.18.0] - 2026-07-14
+
+### Added
+- `hermes-cli` and `hermes-reviewer-default` provide one first-class connector
+  iteration. The stdin bridge invokes Hermes quiet mode and converts the final
+  text plus provider session ID into CAC JSONL events.
+- Hermes capability probing resolves the installed executable and records the
+  bounded `hermes --version` result. Declarative ExecutionProfile `model` maps
+  to Hermes `--model`.
+- Connector conformance covers fresh and resumed sessions, cancellation,
+  timeout, malformed output, and missing or conflicting session identifiers.
+
+### Changed
+- `provider_session_captured` continuation now supports Hermes session IDs
+  under the same ParticipantIdentity, profile, run, and ArtifactVersion lineage
+  rules already used for Codex and Claude. When Hermes rotates an ID after
+  context compression, the successor capture becomes the next resumable leaf.
+- Hermes authentication, provider installation, and credential storage remain
+  outside CAC. The built-in ExecutionProfile passes named environment variables
+  without persisting their values.
+
+### Fixed
+- The historical `cac_tool.py` launcher exports the installed skill root to
+  child `PYTHONPATH`, matching `scripts/consensus`.
+- macOS cancellation reads process start time through `libproc`; sandboxed
+  runs no longer depend on permission to execute `ps`.
+
 ## [0.17.0] - 2026-07-14
 
 ### Added

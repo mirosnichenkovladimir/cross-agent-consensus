@@ -88,6 +88,28 @@ execution_profiles:
       - HTTP_PROXY
       - HTTPS_PROXY
       - NO_PROXY
+  hermes-reviewer-default:
+    adapter: hermes-cli
+    command:
+      - python3
+      - -m
+      - cross_agent_consensus.hermes_cli
+      - --ignore-rules
+    prompt_transport: stdin
+    output_mode: stream_json
+    supports_resume: true
+    env:
+      - HOME
+      - PATH
+      - PYTHONPATH
+      - TMPDIR
+      - LANG
+      - LC_ALL
+      - HERMES_HOME
+      - HERMES_INFERENCE_MODEL
+      - HTTP_PROXY
+      - HTTPS_PROXY
+      - NO_PROXY
 participant_identities:
   codex-orchestrator:
     participant_profile_id: orchestrator-default
@@ -101,6 +123,9 @@ participant_identities:
   claude:
     participant_profile_id: reviewer-default
     execution_profile_id: claude-reviewer-default
+  hermes:
+    participant_profile_id: reviewer-default
+    execution_profile_id: hermes-reviewer-default
 invocation:
   require_invocation_ready: true
   direct_reviewer_cli: explicit_only

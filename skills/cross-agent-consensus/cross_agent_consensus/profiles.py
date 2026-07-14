@@ -90,7 +90,7 @@ def effective_execution_command(
     additions: list[str] = []
     codex_config_keys = _codex_config_keys(command) if adapter_id == "codex-cli" else set()
     if model_id is not None:
-        if adapter_id not in {"codex-cli", "claude-cli"}:
+        if adapter_id not in {"codex-cli", "claude-cli", "hermes-cli"}:
             errors.append(f"model is not supported by adapter {adapter_id}")
         elif _contains_option(command, {"-m", "--model"}) or "model" in codex_config_keys:
             errors.append("model must be declared either in model or command, not both")
@@ -238,6 +238,13 @@ def parse_profile_definitions(
                 f"{prefix}.command must be fresh argv; provider-native resume selectors "
                 "are constructed only from --resume-provider-session-entry"
             )
+        profile_command_error_messages: list[str] = []
+        if hasattr(adapter, "profile_command_errors"):
+            profile_command_error_messages = adapter.profile_command_errors(command)
+        errors.extend(
+            f"{prefix}.command: {message}"
+            for message in profile_command_error_messages
+        )
         if prompt_transport not in capabilities.prompt_transports:
             errors.append(
                 f"{prefix}.prompt_transport {prompt_transport!r} is not supported by {capabilities.player_id}"

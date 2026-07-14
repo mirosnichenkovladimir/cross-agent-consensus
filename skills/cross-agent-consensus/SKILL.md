@@ -232,9 +232,9 @@ receipt. Never retry an unresolved `mutating` or `external_side_effect`
 attempt without an explicit operator decision recorded through
 `--approve-ambiguous-retry --operator-identity <identity>`.
 
-Codex and Claude provider conversations are separate from CAC process sessions.
+Codex, Claude, and Hermes provider conversations are separate from CAC process sessions.
 `session-NNN` names one supervised process; `provider_session_captured` stores
-the Codex thread ID or Claude session UUID. Resume with
+the Codex thread ID, Claude session UUID, or Hermes session ID. Resume with
 `invoke-agent --resume-provider-session-entry <entry-id>`. CAC resumes only the
 same ParticipantIdentity, ParticipantProfile role, ExecutionProfile, adapter,
 run, and ArtifactVersion lineage, and only when the selected entry is the

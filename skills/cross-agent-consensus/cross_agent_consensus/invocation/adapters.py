@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +83,12 @@ class GenericCliPlayer:
                 "path": capabilities.executable_path_or_null,
             },
         )
+
+    def profile_command_errors(self, command: list[str]) -> list[str]:
+        return []
+
+    def allows_provider_session_id_rotation(self) -> bool:
+        return False
 
     def extract_final_output(
         self, paths: AgentSessionPaths, *, require_structured: bool = False
@@ -523,6 +531,108 @@ class CodexCliPlayer(StructuredJsonCliPlayer):
         return super().normalized_event_type(payload, native_type)
 
 
+HERMES_BRIDGE_MODULE = "cross_agent_consensus.hermes_cli"
+
+
+@lru_cache(maxsize=8)
+def detected_hermes_version(executable_path: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [executable_path, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    first_line = completed.stdout.splitlines()[0].strip() if completed.stdout else ""
+    return first_line or None
+
+
+class HermesCliPlayer(StructuredJsonCliPlayer):
+    def __init__(self) -> None:
+        super().__init__("hermes-cli")
+
+    def command_uses_bridge(self, command: list[str]) -> bool:
+        return any(
+            argument == "-m"
+            and index + 1 < len(command)
+            and command[index + 1] == HERMES_BRIDGE_MODULE
+            for index, argument in enumerate(command)
+        )
+
+    def allows_provider_session_id_rotation(self) -> bool:
+        # Hermes may replace a session after mid-turn context compression. Its
+        # quiet-mode exit line names the continuation session that the next
+        # --resume must use.
+        return True
+
+    def profile_command_errors(self, command: list[str]) -> list[str]:
+        if self.command_uses_bridge(command):
+            return []
+        return [
+            "hermes-cli requires `python3 -m "
+            f"{HERMES_BRIDGE_MODULE}` so CAC can pass the prompt on stdin and capture JSONL"
+        ]
+
+    def command_requests_json(self, command: list[str]) -> bool:
+        # ``--json`` permits deterministic provider stubs in the shared
+        # conformance suite; installed profiles use the Hermes bridge module.
+        return self.command_uses_bridge(command) or "--json" in command
+
+    def probe(self, command: list[str]) -> PlayerCapabilities:
+        executable_path = shutil.which("hermes")
+        return PlayerCapabilities(
+            player_id=self.player_id,
+            executable=executable_path is not None,
+            supports_json_events=True,
+            supports_resume=True,
+            supports_cancel=True,
+            prompt_transports=["stdin"],
+            output_modes=["stream_json"],
+            executable_path_or_null=executable_path,
+            resume_conformance_suite_or_null=PROVIDER_RESUME_CONFORMANCE_SUITE,
+            provider_version_or_null=(
+                detected_hermes_version(executable_path) if executable_path else None
+            ),
+            supports_session_id_rotation=True,
+        )
+
+    def extract_provider_session_id(self, paths: AgentSessionPaths) -> str | None:
+        if not paths.stdout.is_file():
+            return None
+        session_ids: set[str] = set()
+        for line in paths.stdout.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            session_id = payload.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                session_ids.add(session_id)
+        if len(session_ids) == 1:
+            return next(iter(session_ids))
+        return None
+
+    def has_native_resume_selector(self, command: list[str]) -> bool:
+        return any(
+            argument in {"--resume", "-r", "--continue", "-c"}
+            or argument.startswith(("--resume=", "--continue="))
+            for argument in command
+        )
+
+    def build_resume_command(self, command: list[str], provider_session_id: str) -> list[str]:
+        if self.has_native_resume_selector(command):
+            raise ValueError("Hermes command already contains a resume selector")
+        return [*command, "--resume", provider_session_id]
+
+
 class ManualPlayer:
     player_id = "manual"
 
@@ -545,6 +655,7 @@ PLAYER_ALIASES: dict[str, str] = {
     "claude": "claude-cli",
     "deepseek": "deepseek-cli",
     "generic": "generic-cli",
+    "hermes": "hermes-cli",
 }
 
 _PLAYER_FACTORIES: dict[str, Any] = {
@@ -552,6 +663,7 @@ _PLAYER_FACTORIES: dict[str, Any] = {
     "claude-cli": ClaudeCliPlayer,
     "codex-cli": CodexCliPlayer,
     "generic-cli": lambda: GenericCliPlayer("generic-cli"),
+    "hermes-cli": HermesCliPlayer,
     "deepseek-cli": lambda: GenericCliPlayer("deepseek-cli"),
 }
 
@@ -568,6 +680,17 @@ def get_player_adapter(player_id: str) -> GenericCliPlayer | ManualPlayer:
     )
 
 
+def adapter_allows_provider_session_id_rotation(player_id: str) -> bool:
+    try:
+        adapter = get_player_adapter(player_id)
+    except ValueError:
+        return False
+    return bool(
+        isinstance(adapter, GenericCliPlayer)
+        and adapter.allows_provider_session_id_rotation()
+    )
+
+
 def capability_payload(capabilities: PlayerCapabilities) -> dict[str, Any]:
     return {
         "schema_version": "cross-agent-consensus-player-capabilities-1",
@@ -580,6 +703,8 @@ def capability_payload(capabilities: PlayerCapabilities) -> dict[str, Any]:
         "output_modes": capabilities.output_modes,
         "executable_path_or_null": capabilities.executable_path_or_null,
         "resume_conformance_suite_or_null": capabilities.resume_conformance_suite_or_null,
+        "provider_version_or_null": capabilities.provider_version_or_null,
+        "supports_session_id_rotation": capabilities.supports_session_id_rotation,
     }
 
 
@@ -597,6 +722,7 @@ def cmd_players_probe(args: Any) -> int:
             print(f"path: {payload['executable_path_or_null']}")
             print(f"prompt_transports: {', '.join(payload['prompt_transports'])}")
             print(f"output_modes: {', '.join(payload['output_modes'])}")
+            print(f"provider_version: {payload['provider_version_or_null']}")
         return 0 if capabilities.executable or args.player == "manual" else 2
     except Exception as exc:
         eprint(f"error: {exc}")

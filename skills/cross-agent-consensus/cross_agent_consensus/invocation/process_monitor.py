@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 import selectors
 import signal
 import socket
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -75,6 +77,70 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
 DEFAULT_STALE_TIMEOUT_SECONDS = 1200.0
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
 DEFAULT_CANCEL_GRACE_SECONDS = 10.0
+PROC_PIDTBSDINFO = 3
+
+
+class DarwinProcessBsdInfo(ctypes.Structure):
+    """Subset-compatible layout of macOS ``struct proc_bsdinfo``."""
+
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32),
+        ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32),
+        ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32),
+        ("pbi_rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16),
+        ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32),
+        ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32),
+        ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64),
+        ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
+
+
+def darwin_process_identity(pid: int) -> dict[str, Any] | None:
+    """Read one process start time through libproc without invoking ``ps``."""
+
+    try:
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        proc_pidinfo = libproc.proc_pidinfo
+        proc_pidinfo.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        proc_pidinfo.restype = ctypes.c_int
+        process_info = DarwinProcessBsdInfo()
+        copied = proc_pidinfo(
+            pid,
+            PROC_PIDTBSDINFO,
+            0,
+            ctypes.byref(process_info),
+            ctypes.sizeof(process_info),
+        )
+    except (AttributeError, OSError):
+        return None
+    if copied != ctypes.sizeof(process_info):
+        return None
+    return {
+        "method": "darwin_proc_bsdinfo_starttime",
+        "pid": pid,
+        "started_seconds": int(process_info.pbi_start_tvsec),
+        "started_microseconds": int(process_info.pbi_start_tvusec),
+    }
 
 
 def _sha256_or_none(path: Path) -> str | None:
@@ -111,6 +177,10 @@ def current_process_identity(pid: int) -> dict[str, Any] | None:
             }
         except (IndexError, OSError):
             return None
+    if sys.platform == "darwin":
+        darwin_identity = darwin_process_identity(pid)
+        if darwin_identity is not None:
+            return darwin_identity
     try:
         result = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(pid)],

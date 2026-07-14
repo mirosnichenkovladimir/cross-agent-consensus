@@ -281,6 +281,14 @@ def player_command_telemetry_errors(player_id: str, command: list[str]) -> list[
             messages.append("--player claude-cli with stream-json requires --verbose to emit message/tool events")
     if player_id == "codex-cli" and not command_has_arg(command, "--json"):
         messages.append("--player codex-cli requires --json for runtime message telemetry")
+    if player_id == "hermes-cli":
+        from cross_agent_consensus.invocation.adapters import HERMES_BRIDGE_MODULE
+
+        if HERMES_BRIDGE_MODULE not in command:
+            messages.append(
+                f"--player hermes-cli requires -m {HERMES_BRIDGE_MODULE} "
+                "for stdin prompt transport and JSONL telemetry"
+            )
     return messages
 
 

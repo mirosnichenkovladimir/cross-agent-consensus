@@ -133,6 +133,20 @@ The three configuration mappings have separate meanings:
 
 Execution Profile argv is an explicit command preset. It does not bypass `invocation-ready`, does not authorize launch, and does not permit dynamic provider substitution. Version 0.13.0 rejects schema `cross-agent-consensus-config-1` and `reviewer_clis`; use `cross-agent-consensus-config-2`, `execution_profiles`, and `participant_identities`.
 
+The built-in `hermes-reviewer-default` profile uses adapter `hermes-cli` and
+`python3 -m cross_agent_consensus.hermes_cli --ignore-rules`. The bridge keeps
+the CAC prompt on stdin until it invokes Hermes, converts Hermes quiet-mode
+stdout plus the stderr `session_id:` line into JSONL, and passes `model:` as
+Hermes `--model`. Hermes authentication, provider installation, and credential
+storage remain in Hermes; CAC passes only the environment-variable names in
+the ExecutionProfile. `players probe` reports the resolved Hermes executable
+and the bounded `hermes --version` result.
+If Hermes rotates its session ID after context compression, the captured
+successor becomes the next resumable leaf; the predecessor link and stable
+ParticipantIdentity/profile ownership remain mandatory. On macOS, cancellation
+uses `libproc` start time for PID-reuse protection instead of shelling out to
+`ps`.
+
 ## Execution attempts
 
 `invoke-agent` appends `execution_attempt_started` to `events.jsonl` before it
@@ -165,7 +179,7 @@ then binds the new `ArtifactVersion` record hash to that attempt.
 ## Provider-session continuation
 
 CAC `session-NNN` identifies one supervised operating-system process. A Codex
-thread ID or Claude session UUID identifies the provider conversation that may
+thread ID, Claude session UUID, or Hermes session ID identifies the provider conversation that may
 span several CAC process sessions. After a successful resumable-provider exit,
 CAC extracts that provider identifier and appends `provider_session_captured`
 before it writes promoted terminal output.

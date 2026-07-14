@@ -701,8 +701,11 @@ def provider_session_event_messages(events: list[dict[str, Any]]) -> list[str]:
                     "must be an earlier entry"
                 )
             else:
+                from cross_agent_consensus.invocation.adapters import (
+                    adapter_allows_provider_session_id_rotation,
+                )
+
                 stable_fields = {
-                    "provider_session_id",
                     "run_id",
                     "participant_identity",
                     "participant_profile_id",
@@ -711,6 +714,10 @@ def provider_session_event_messages(events: list[dict[str, Any]]) -> list[str]:
                     "phase",
                     "artifact_lineage_root_id_or_null",
                 }
+                if not adapter_allows_provider_session_id_rotation(
+                    str(details.get("player_id") or "")
+                ):
+                    stable_fields.add("provider_session_id")
                 for field in sorted(stable_fields):
                     if predecessor.get(field) != details.get(field):
                         messages.append(
