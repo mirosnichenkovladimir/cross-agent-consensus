@@ -11,6 +11,6 @@ When acting as Reviewer Agent:
 
 When acting as Author Agent:
 
-- Respond to every material Canonical Finding.
+- Respond to every material Normalized Finding.
 - Reject false positives explicitly with reasoning.
 - Produce a new Artifact Version for any revision.

@@ -18,6 +18,7 @@ if str(SKILL_ROOT_FOR_IMPORTS) not in sys.path:
 from cross_agent_consensus.io import (
     append_text,
     atomic_write_new,
+    atomic_write_text,
     eprint,
     hash_locator,
     read_cac_version,
@@ -25,6 +26,7 @@ from cross_agent_consensus.io import (
     slugify,
     utc_now,
 )
+from cross_agent_consensus.integrity import content_locator_base
 from cross_agent_consensus.init import build_init_files
 from cross_agent_consensus.normalize import cmd_normalize
 from cross_agent_consensus.record_schema import ENUMS
@@ -67,7 +69,8 @@ from cross_agent_consensus.layout import (
     round_number,
 )
 from cross_agent_consensus.records import (
-    canonical_finding_ids,
+    FindingSchemaError,
+    normalized_finding_ids,
     first_record,
     parse_run_records,
     parse_run_snapshot,
@@ -83,12 +86,22 @@ from cross_agent_consensus.prompts import (
 )
 from cross_agent_consensus.run_macro import cmd_run
 from cross_agent_consensus.run_store import run_id_from_task
+from cross_agent_consensus.run_audit import (
+    append_run_event_locked,
+    derive_run_phase,
+    exclusive_file_lock,
+    locked_run_command,
+    read_run_events,
+    run_lock,
+)
 from cross_agent_consensus.termination import terminal_body
 from cross_agent_consensus.validation import (
     check_links,
+    check_integrity,
     check_participants,
     check_pre_execution,
     check_records,
+    check_run_events,
     check_reviewer_isolation,
     check_terminal,
     check_terminal_records,
@@ -165,15 +178,11 @@ def cmd_init(args: argparse.Namespace) -> int:
         if missing:
             raise ValueError("missing required init input(s): " + ", ".join(missing))
         run_root = Path(args.run_root)
-        run_id = args.run_id or run_id_from_task(args.task, run_root)
-        safe_relative_path(run_id, "run_id")
-        run = run_root / run_id
-        if run.exists() and not args.allow_existing and not args.dry_run:
-            eprint(f"error: run already exists: {run}")
-            return 1
-        created_at = utc_now()
-        files = build_init_files(args, run_id, created_at)
         if args.dry_run:
+            run_id = args.run_id or run_id_from_task(args.task, run_root)
+            safe_relative_path(run_id, "run_id")
+            run = run_root / run_id
+            files = build_init_files(args, run_id, utc_now())
             status = "would reuse existing run" if run.exists() else "would create run"
             print(f"{status}: {run}")
             print(f"run_id: {run_id}")
@@ -187,11 +196,33 @@ def cmd_init(args: argparse.Namespace) -> int:
                 for message in resolution.warnings:
                     print(f"  - {message}")
             return 0
-        make_run_tree(run, layout=DEFAULT_LAYOUT)
-        for path, content in files.items():
-            if path.exists() and args.allow_existing:
-                continue
-            atomic_write_new(path, content)
+        run_root.mkdir(parents=True, exist_ok=True)
+        allocation_lock = run_root / ".cac-init.lock"
+        with exclusive_file_lock(allocation_lock):
+            run_id = args.run_id or run_id_from_task(args.task, run_root)
+            safe_relative_path(run_id, "run_id")
+            run = run_root / run_id
+            if run.exists() and not args.allow_existing:
+                eprint(f"error: run already exists: {run}")
+                return 1
+            files = build_init_files(args, run_id, utc_now())
+            run.mkdir(parents=False, exist_ok=args.allow_existing)
+            with run_lock(run):
+                phase_before = derive_run_phase(parse_run_records(run))
+                make_run_tree(run, layout=DEFAULT_LAYOUT)
+                for path, content in files.items():
+                    if path.exists() and args.allow_existing:
+                        continue
+                    atomic_write_new(path, content)
+                phase_after = derive_run_phase(parse_run_records(run))
+                append_run_event_locked(
+                    run,
+                    "run_initialized",
+                    actor_identity=str(args.orchestrator),
+                    phase_before=phase_before,
+                    phase_after=phase_after,
+                    details={"run_id_source": "user-supplied" if args.run_id else "generated"},
+                )
         print(f"created run: {run}")
         return 0
     except Exception as exc:
@@ -217,6 +248,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
             args.links,
             args.reviewer_isolation,
             args.participants,
+            args.integrity,
+            args.run_events,
             args.terminal,
         ]
     )
@@ -230,6 +263,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         checks.append(("links", check_links(run, snapshot)))
     if args.reviewer_isolation or run_all:
         checks.append(("reviewer-isolation", check_reviewer_isolation(run, snapshot)))
+    if args.integrity or run_all:
+        checks.append(("integrity", check_integrity(run, snapshot)))
+    if args.run_events or run_all:
+        checks.append(("run-events", check_run_events(run)))
     if args.terminal:
         checks.append(("terminal", check_terminal(run, snapshot)))
     for name, result in checks:
@@ -242,6 +279,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     records = parse_run_records(run)
     print(f"Run: {run}")
     print(f"Exists: {'yes' if run.exists() else 'no'}")
+    print(f"Phase: {derive_run_phase(records)}")
+    events = read_run_events(run)
+    print(f"Run events: {len(events)}")
     for record_type in [
         "TaskBrief",
         "Policy",
@@ -250,7 +290,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         "ReviewBatch",
         "ArtifactVersion",
         "RawReviewerOutput",
-        "CanonicalFinding",
+        "NormalizedFinding",
         "AuthorResponse",
         "ReReviewDecision",
         "ValidationEvidence",
@@ -483,6 +523,7 @@ def cmd_config_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+@locked_run_command("artifact_version_created")
 def cmd_new_artifact(args: argparse.Namespace) -> int:
     run = Path(args.run)
     try:
@@ -492,7 +533,7 @@ def cmd_new_artifact(args: argparse.Namespace) -> int:
         content_hash = hash_locator(args.content_locator, Path.cwd())
         data = {
             "record_type": "ArtifactVersion",
-            "schema_version": "m2-markdown-1",
+            "schema_version": "m2-markdown-2",
             "run_id": run.name,
             "actor_identity": args.actor,
             "created_at": utc_now(),
@@ -500,6 +541,7 @@ def cmd_new_artifact(args: argparse.Namespace) -> int:
             "predecessor_id_or_null": args.predecessor,
             "content_locator": args.content_locator,
             "content_hash_or_null": content_hash,
+            "content_locator_base_or_null": content_locator_base(args.content_locator, Path.cwd()),
             "produced_by": args.produced_by,
         }
         body = "\n".join(
@@ -530,18 +572,19 @@ def cmd_new_artifact(args: argparse.Namespace) -> int:
         return 1
 
 
+@locked_run_command("author_response_skeleton_written")
 def cmd_response_skeleton(args: argparse.Namespace) -> int:
     run = Path(args.run)
     records = parse_run_records(run)
     findings = []
-    for record in records_by_type(records, "CanonicalFinding"):
+    for record in records_by_type(records, "NormalizedFinding"):
         data = record.data
         if data.get("scope_classification") == "in_scope" and data.get("blocking_status") == "blocking":
-            findings.append(data.get("canonical_finding_id"))
+            findings.append(data.get("normalized_finding_id"))
     if args.finding_id:
         findings = args.finding_id
     if not findings:
-        print("no in-scope blocking canonical findings found")
+        print("no in-scope blocking normalized findings found")
         return 0
     pending = pending_conclusion_validation_batches(records, [str(finding_id) for finding_id in findings])
     if pending:
@@ -568,12 +611,12 @@ def cmd_response_skeleton(args: argparse.Namespace) -> int:
                 f"## AuthorResponse {response_id}",
                 "---",
                 "record_type: AuthorResponse",
-                "schema_version: m2-markdown-1",
+                "schema_version: m2-markdown-2",
                 f"run_id: {run.name}",
                 f"actor_identity: {args.actor}",
                 f"created_at: {utc_now()}",
                 f"author_response_id: {response_id}",
-                f"canonical_finding_id: {finding_id}",
+                f"normalized_finding_id: {finding_id}",
                 "response_type: <accept|reject|partially_accept|request_clarification>",
                 "rationale: <required>",
                 "resulting_artifact_version_id_or_null: null",
@@ -591,6 +634,7 @@ def cmd_response_skeleton(args: argparse.Namespace) -> int:
     return 0
 
 
+@locked_run_command("rereview_skeleton_written")
 def cmd_rereview_skeleton(args: argparse.Namespace) -> int:
     run = Path(args.run)
     records = parse_run_records(run)
@@ -604,7 +648,7 @@ def cmd_rereview_skeleton(args: argparse.Namespace) -> int:
     review_batch = review_batch_by_id(records, args.review_batch)
     findings = rereview_finding_ids(records, review_batch, args.finding_id)
     if not findings:
-        print("no canonical findings found")
+        print("no normalized findings found")
         return 0
     blockers: list[tuple[str, str | None, int, str, int]] = []
     for reviewer in args.reviewer:
@@ -613,24 +657,25 @@ def cmd_rereview_skeleton(args: argparse.Namespace) -> int:
         print_rereview_blockers(run, records, blockers, args.actor)
         return 2
     for reviewer in args.reviewer:
+        batch_slug = slugify(args.review_batch)
         if detect_run_layout(run) == DEFAULT_LAYOUT:
-            target = round_dir(run, args.round) / "rereviews" / f"{slugify(reviewer)}.md"
+            target = round_dir(run, args.round) / "rereviews" / batch_slug / f"{slugify(reviewer)}.md"
         else:
-            target = run / "rereviews" / f"{args.round}-{slugify(reviewer)}.md"
+            target = run / "rereviews" / batch_slug / f"{args.round}-{slugify(reviewer)}.md"
         sections = [f"# Re-Review {args.round}: {reviewer}", ""]
         for index, finding_id in enumerate(findings, 1):
-            decision_id = f"re-review-{args.round}-{slugify(reviewer)}-{index:03d}"
+            decision_id = f"re-review-{args.round}-{batch_slug}-{slugify(reviewer)}-{index:03d}"
             sections.extend(
                 [
                     f"## ReReviewDecision {decision_id}",
                     "---",
                     "record_type: ReReviewDecision",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     f"actor_identity: {args.actor}",
                     f"created_at: {utc_now()}",
                     f"re_review_decision_id: {decision_id}",
-                    f"canonical_finding_id: {finding_id}",
+                    f"normalized_finding_id: {finding_id}",
                     f"reviewer_identity: {reviewer}",
                     "decision: <verified|rejection_accepted|still_valid|disputed|needs_human>",
                     "rationale: <required>",
@@ -678,6 +723,7 @@ def resolve_existing_round(records: list[Any], explicit_round: str | None) -> st
     raise ValueError(f"no ReviewBatch found for {round_id_from_number(wanted)}")
 
 
+@locked_run_command("conclusion_validation_created")
 def cmd_conclusion_validation(args: argparse.Namespace) -> int:
     run = Path(args.run)
     records = parse_run_records(run)
@@ -690,15 +736,15 @@ def cmd_conclusion_validation(args: argparse.Namespace) -> int:
         if artifact is None:
             raise ValueError("ArtifactVersion record is required")
         findings = args.finding_id or [
-            str(record.data.get("canonical_finding_id")) for record in records_by_type(records, "CanonicalFinding")
+            str(record.data.get("normalized_finding_id")) for record in records_by_type(records, "NormalizedFinding")
         ]
         findings = [finding_id for finding_id in findings if finding_id]
         if not findings:
-            raise ValueError("no CanonicalFinding records found; normalize findings before conclusion validation")
-        canonical_ids = canonical_finding_ids(records)
-        missing = [finding_id for finding_id in findings if finding_id not in canonical_ids]
+            raise ValueError("no NormalizedFinding records found; normalize findings before conclusion validation")
+        normalized_ids = normalized_finding_ids(records)
+        missing = [finding_id for finding_id in findings if finding_id not in normalized_ids]
         if missing:
-            raise ValueError(f"canonical finding id not found: {', '.join(missing)}")
+            raise ValueError(f"normalized finding id not found: {', '.join(missing)}")
         round_id = args.round
         batch_id = args.review_batch_id or next_review_batch_id(
             records,
@@ -723,7 +769,7 @@ def cmd_conclusion_validation(args: argparse.Namespace) -> int:
                 frontmatter(
                     {
                         "record_type": "ReviewBatch",
-                        "schema_version": "m2-markdown-1",
+                        "schema_version": "m2-markdown-2",
                         "run_id": run.name,
                         "actor_identity": args.actor,
                         "created_at": created_at,
@@ -741,7 +787,7 @@ def cmd_conclusion_validation(args: argparse.Namespace) -> int:
                 "",
                 "### Conclusion Validation Dispatch Notes",
                 "",
-                "- Purpose: recalled reviewers validate the normalized canonical superset and proposed conclusions.",
+                "- Purpose: recalled reviewers validate the normalized finding superset and proposed conclusions.",
                 "- This is not a fresh review; reviewers must not introduce unrelated findings.",
                 "- Every reviewer decision must include rationale/argumentation and evidence references.",
                 "- AuthorResponse sections should wait until this validation batch is captured or explicitly skipped by policy.",
@@ -779,12 +825,15 @@ def cmd_conclusion_validation(args: argparse.Namespace) -> int:
         return 1
 
 
+@locked_run_command("run_terminated")
 def cmd_terminate(args: argparse.Namespace) -> int:
     run = Path(args.run)
     records = parse_run_records(run)
     prechecks = [
         ("records", check_records(run)),
         ("links", check_links(run)),
+        ("integrity", check_integrity(run)),
+        ("run-events", check_run_events(run)),
     ]
     for name, result in prechecks:
         if not result.ok:
@@ -806,11 +855,7 @@ def cmd_terminate(args: argparse.Namespace) -> int:
         if not terminal_result.ok:
             print_check("terminal", terminal_result)
             return 2
-    try:
-        atomic_write_new(path, body)
-    except FileExistsError as exc:
-        eprint(f"error: {exc}")
-        return 1
+    atomic_write_text(path, body)
     result = check_terminal(run)
     print_check("terminal", result)
     print(f"wrote report: {path}")
@@ -826,7 +871,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=CAC_VERSION)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    init = sub.add_parser("init", help="Create a canonical run folder and initial records.")
+    init = sub.add_parser("init", help="Create a protocol run folder and initial records.")
     init.add_argument("--task")
     init.add_argument("--task-file")
     init.add_argument("--config")
@@ -907,6 +952,8 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--links", action="store_true")
     validate.add_argument("--reviewer-isolation", action="store_true")
     validate.add_argument("--participants", action="store_true")
+    validate.add_argument("--integrity", action="store_true")
+    validate.add_argument("--run-events", action="store_true")
     validate.add_argument("--terminal", action="store_true")
     validate.set_defaults(func=cmd_validate)
 
@@ -964,7 +1011,7 @@ def build_parser() -> argparse.ArgumentParser:
     artifact.add_argument("--actor", default="orchestrator-consensus-tool")
     artifact.set_defaults(func=cmd_new_artifact)
 
-    response = sub.add_parser("response-skeleton", help="Scaffold AuthorResponse sections for canonical findings.")
+    response = sub.add_parser("response-skeleton", help="Scaffold AuthorResponse sections for normalized findings.")
     add_common_run_arg(response)
     response.add_argument("--round")
     response.add_argument("--actor", default="author")
@@ -1027,7 +1074,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--round",
         required=True,
-        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms normalize to 'round-N'.",
     )
     run.add_argument("--phase", choices=["author", "reviewer", "rereview", "validator"], required=True)
     run.add_argument("--actors", help="Comma-separated subset; default = all actors named for this phase in this round.")
@@ -1058,7 +1105,7 @@ def build_parser() -> argparse.ArgumentParser:
     invoke.add_argument(
         "--round",
         default="round-1",
-        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms normalize to 'round-N'.",
     )
     invoke.add_argument("--phase", required=True, choices=["author", "reviewer", "validator", "manual"])
     invoke.add_argument("--actor", required=True)
@@ -1113,7 +1160,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent_peek.add_argument(
         "--round",
         default="round-1",
-        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms normalize to 'round-N'.",
     )
     agent_peek.add_argument("--session", help="Specific session directory name; defaults to the latest session.")
     agent_peek.add_argument("--tail", type=int, help="Max event lines to scan from each telemetry file (1-1000).")
@@ -1149,13 +1196,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     normalize = sub.add_parser(
         "normalize",
-        help="Skeleton NormalizationRecord/CanonicalFinding from captured RawFindings.",
+        help="Skeleton NormalizationRecord/NormalizedFinding from captured RawFindings.",
     )
     add_common_run_arg(normalize)
     normalize.add_argument(
         "--round",
         required=True,
-        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms resolve to the canonical 'round-N'.",
+        help="Round identifier (e.g. '1', 'round-1', or 'round-001'); all forms normalize to 'round-N'.",
     )
     normalize.add_argument("--actor", default="orchestrator-consensus-tool")
     normalize.add_argument("--merge-overlap", action="store_true")
@@ -1212,7 +1259,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(normalize_command_separator(list(argv) if argv is not None else sys.argv[1:]))
-    return args.func(args)
+    try:
+        return args.func(args)
+    except FindingSchemaError as exc:
+        eprint(f"error: {exc}")
+        return 2
 
 
 if __name__ == "__main__":

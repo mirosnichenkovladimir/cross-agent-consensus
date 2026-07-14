@@ -1,11 +1,11 @@
 # Normalization Round <n>
 
-Append NormalizationRecord and CanonicalFinding sections in creation order. Add MaterialityChallenge sections only when materiality is disputed before termination begins.
+Append NormalizationRecord and NormalizedFinding sections in creation order. Add MaterialityChallenge sections only when materiality is disputed before termination begins.
 
 ## NormalizationRecord normalization-round-<n>-001
 ---
 record_type: NormalizationRecord
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
@@ -18,7 +18,7 @@ materiality: material
 scope_classification: in_scope
 blocking_status: blocking
 rationale: <normalization-rationale>
-canonical_finding_id: canonical-finding-001
+normalized_finding_id: nf-round-1-001
 ---
 
 ### Normalization Notes
@@ -27,14 +27,14 @@ canonical_finding_id: canonical-finding-001
 - Evidence summary:
 - Scope rationale:
 
-## CanonicalFinding canonical-finding-001
+## NormalizedFinding nf-round-1-001
 ---
-record_type: CanonicalFinding
-schema_version: m2-markdown-1
+record_type: NormalizedFinding
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
-canonical_finding_id: canonical-finding-001
+normalized_finding_id: nf-round-1-001
 target_artifact_version_id: <artifact_version_id>
 source_raw_finding_ids:
   - <raw_finding_id>
@@ -44,12 +44,12 @@ materiality_status: undisputed
 scope_classification: in_scope
 blocking_status: blocking
 lifecycle_state: open
-claim: <canonical-claim>
+claim: <normalized-claim>
 rationale_or_summary: <summary>
 clarification_pending: false
 ---
 
-### Canonical Finding Notes
+### Normalized Finding Notes
 
 - Required author action:
 - Related records:
@@ -60,12 +60,12 @@ Allowed `lifecycle_state` values: `open`, `accepted`, `fixed`, `verified`, `reje
 ## MaterialityChallenge materiality-challenge-001
 ---
 record_type: MaterialityChallenge
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <challenger_identity>
 created_at: <ISO-8601>
 materiality_challenge_id: materiality-challenge-001
-canonical_finding_id: canonical-finding-001
+normalized_finding_id: nf-round-1-001
 claimed_materiality: <material-or-non_material-or-other-policy-value>
 rationale: <challenge-rationale>
 supporting_record_ids:

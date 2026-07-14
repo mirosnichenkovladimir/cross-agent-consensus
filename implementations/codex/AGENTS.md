@@ -5,7 +5,7 @@ When participating in a consensus run, follow the role assigned by the Orchestra
 ## If Author Agent
 
 - Produce the requested Artifact Version.
-- Respond explicitly to every material Canonical Finding.
+- Respond explicitly to every material Normalized Finding.
 - Valid responses: accept, reject, partially_accept, request_clarification.
 - If rejecting, explain why the finding is invalid, non-material, or outside scope.
 - Do not silently apply all reviewer suggestions.

@@ -17,10 +17,239 @@ from cross_agent_consensus.markdown_records import (
     parse_yaml_subset,
     render_yaml,
 )
-from cross_agent_consensus.records import is_protocol_payload_path
+from cross_agent_consensus.records import (
+    FindingSchemaError,
+    is_protocol_payload_path,
+    parse_run_records,
+    parse_run_snapshot,
+)
+from cross_agent_consensus.validation import check_records
 
 
 class MarkdownRecordTests(unittest.TestCase):
+    @staticmethod
+    def _finding_data(
+        *,
+        schema_version: str,
+        record_type: str,
+        identifier_field: str,
+        identifier: str,
+    ) -> dict[str, object]:
+        return {
+            "record_type": record_type,
+            "schema_version": schema_version,
+            "run_id": "sample",
+            "actor_identity": "orchestrator",
+            "created_at": "2026-06-01T00:00:00Z",
+            identifier_field: identifier,
+            "target_artifact_version_id": "v1",
+            "source_raw_finding_ids": ["rf-001"],
+            "normalization_record_id": "normalization-001",
+            "materiality": "material",
+            "materiality_status": "undisputed",
+            "scope_classification": "in_scope",
+            "blocking_status": "blocking",
+            "lifecycle_state": "open",
+            "claim": "missing permission check",
+            "rationale_or_summary": "the endpoint lacks authorization",
+            "clarification_pending": False,
+        }
+
+    def test_historical_finding_decodes_to_current_model_and_preserves_identifier(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            path = Path(tmp_name) / "normalization.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## CanonicalFinding cf-round-1-001",
+                        frontmatter(
+                            self._finding_data(
+                                schema_version="m2-markdown-1",
+                                record_type="CanonicalFinding",
+                                identifier_field="canonical_finding_id",
+                                identifier="cf-round-1-001",
+                            )
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = parse_records_with_diagnostics(path)
+
+        self.assertEqual(parsed.diagnostics, [])
+        self.assertEqual(len(parsed.records), 1)
+        record = parsed.records[0]
+        self.assertEqual(record.record_type, "NormalizedFinding")
+        self.assertEqual(record.record_id, "cf-round-1-001")
+        self.assertEqual(record.data["normalized_finding_id"], "cf-round-1-001")
+        self.assertNotIn("canonical_finding_id", record.data)
+        self.assertEqual(record.finding_schema_origin, "legacy")
+
+    def test_historical_lifecycle_reference_decodes_to_current_identifier_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            path = Path(tmp_name) / "author-responses.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## AuthorResponse response-001",
+                        frontmatter(
+                            {
+                                "record_type": "AuthorResponse",
+                                "schema_version": "m2-markdown-1",
+                                "run_id": "sample",
+                                "actor_identity": "author",
+                                "created_at": "2026-06-01T00:00:00Z",
+                                "author_response_id": "response-001",
+                                "canonical_finding_id": "cf-round-1-001",
+                                "response_type": "accept",
+                                "rationale": "fixed",
+                                "resulting_artifact_version_id_or_null": "v2",
+                                "clarification_request_or_null": None,
+                            }
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = parse_records_with_diagnostics(path)
+
+        self.assertEqual(parsed.diagnostics, [])
+        self.assertEqual(parsed.records[0].data["normalized_finding_id"], "cf-round-1-001")
+        self.assertNotIn("canonical_finding_id", parsed.records[0].data)
+        self.assertEqual(parsed.records[0].finding_schema_origin, "legacy")
+
+    def test_current_schema_rejects_historical_finding_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            path = Path(tmp_name) / "normalization.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## CanonicalFinding cf-round-1-001",
+                        frontmatter(
+                            self._finding_data(
+                                schema_version="m2-markdown-2",
+                                record_type="CanonicalFinding",
+                                identifier_field="canonical_finding_id",
+                                identifier="cf-round-1-001",
+                            )
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = parse_records_with_diagnostics(path)
+
+        self.assertEqual(parsed.records, [])
+        self.assertEqual(len(parsed.diagnostics), 1)
+        self.assertIn("historical finding names are not valid", parsed.diagnostics[0].message)
+
+    def test_historical_schema_rejects_current_finding_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            path = Path(tmp_name) / "normalization.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## NormalizedFinding nf-round-1-001",
+                        frontmatter(
+                            self._finding_data(
+                                schema_version="m2-markdown-1",
+                                record_type="NormalizedFinding",
+                                identifier_field="normalized_finding_id",
+                                identifier="nf-round-1-001",
+                            )
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = parse_records_with_diagnostics(path)
+
+        self.assertEqual(parsed.records, [])
+        self.assertEqual(len(parsed.diagnostics), 1)
+        self.assertIn("current finding names are not valid", parsed.diagnostics[0].message)
+
+    def test_run_snapshot_rejects_mixed_historical_and_current_finding_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name)
+            legacy = run / "legacy.md"
+            current = run / "current.md"
+            legacy.write_text(
+                "\n".join(
+                    [
+                        "## CanonicalFinding cf-round-1-001",
+                        frontmatter(
+                            self._finding_data(
+                                schema_version="m2-markdown-1",
+                                record_type="CanonicalFinding",
+                                identifier_field="canonical_finding_id",
+                                identifier="cf-round-1-001",
+                            )
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            current.write_text(
+                "\n".join(
+                    [
+                        "## NormalizedFinding nf-round-1-001",
+                        frontmatter(
+                            self._finding_data(
+                                schema_version="m2-markdown-2",
+                                record_type="NormalizedFinding",
+                                identifier_field="normalized_finding_id",
+                                identifier="nf-round-1-001",
+                            )
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = parse_run_snapshot(run)
+            result = check_records(run, snapshot)
+            with self.assertRaisesRegex(FindingSchemaError, "mixes historical and current"):
+                parse_run_records(run)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any("mixes historical and current finding records" in message for message in result.messages)
+        )
+
+    def test_historical_finding_record_passes_current_record_validation_after_decode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name)
+            path = run / "normalization.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "## CanonicalFinding cf-round-1-001",
+                        frontmatter(
+                            self._finding_data(
+                                schema_version="m2-markdown-1",
+                                record_type="CanonicalFinding",
+                                identifier_field="canonical_finding_id",
+                                identifier="cf-round-1-001",
+                            )
+                        ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = check_records(run)
+
+        self.assertTrue(result.ok, result.messages)
+
     def test_rendered_yaml_preserves_ambiguous_strings(self) -> None:
         values = {
             "boolean_text": "true",
@@ -71,7 +300,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         frontmatter(
                             {
                                 "record_type": "TaskBrief",
-                                "schema_version": "m2-markdown-1",
+                                "schema_version": "m2-markdown-2",
                                 "run_id": "sample",
                                 "actor_identity": "orchestrator",
                                 "created_at": "2026-06-01T00:00:00Z",
@@ -107,7 +336,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         frontmatter(
                             {
                                 "record_type": "HumanDecision",
-                                "schema_version": "m2-markdown-1",
+                                "schema_version": "m2-markdown-2",
                                 "run_id": "sample",
                                 "actor_identity": "human",
                                 "created_at": "2026-06-02T00:00:00Z",
@@ -141,7 +370,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         "## TaskBrief task-eof",
                         "---",
                         "record_type: TaskBrief",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         "run_id: sample",
                         "actor_identity: orchestrator",
                         "created_at: 2026-06-01T00:00:00Z",
@@ -174,7 +403,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         "## TaskBrief task-001",
                         "---",
                         "record_type: TaskBrief",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         "run_id: sample",
                         "actor_identity: orchestrator",
                         "created_at: 2026-06-01T00:00:00Z",
@@ -189,7 +418,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         "## Participants participants-001",
                         "---",
                         "record_type: Participants",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         "run_id: sample",
                         "actor_identity: orchestrator",
                         "created_at: 2026-06-01T00:00:00Z",
@@ -220,7 +449,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         "## TaskBrieff task-001",
                         "---",
                         "record_type: TaskBrieff",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         "---",
                         "",
                     ]
@@ -245,7 +474,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         frontmatter(
                             {
                                 "record_type": "RawFinding",
-                                "schema_version": "m2-markdown-1",
+                                "schema_version": "m2-markdown-2",
                                 "run_id": "sample",
                                 "actor_identity": "orchestrator",
                                 "created_at": "2026-06-01T00:00:00Z",
@@ -289,7 +518,7 @@ class MarkdownRecordTests(unittest.TestCase):
                         frontmatter(
                             {
                                 "record_type": "FinalReport",
-                                "schema_version": "m2-markdown-1",
+                                "schema_version": "m2-markdown-2",
                                 "run_id": "sample",
                                 "actor_identity": "orchestrator",
                                 "created_at": "2026-06-01T00:00:00Z",

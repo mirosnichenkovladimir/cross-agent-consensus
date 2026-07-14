@@ -174,14 +174,29 @@ def round_first_prompt_target(
         return current_round / "prompts" / f"{name}{suffix}"
     if args.phase == "reviewer":
         batch = selected_review_batch(records, args) if records is not None else None
-        if batch is not None and is_conclusion_validation_batch(batch, records):
+        is_first_batch_for_round = True
+        if batch is not None and records is not None:
+            batch_round = record_round_number(batch)
+            same_round_batches = [
+                record
+                for record in records_by_type(records, "ReviewBatch")
+                if record_round_number(record) == batch_round
+            ]
+            is_first_batch_for_round = bool(same_round_batches) and (
+                same_round_batches[0].data.get("review_batch_id") == batch.data.get("review_batch_id")
+            )
+        if batch is not None and (not is_first_batch_for_round or is_conclusion_validation_batch(batch, records)):
             qualifier = slugify(str(batch.data.get("review_batch_id")))
             return current_round / "prompts" / "reviewers" / qualifier / f"{actor}{suffix}"
         return current_round / "prompts" / "reviewers" / f"{actor}{suffix}"
     if args.phase == "validator":
         return current_round / "prompts" / "validators" / f"{actor}{suffix}"
     if args.phase == "rereview":
-        return current_round / "prompts" / "rereviews" / f"{actor}{suffix}"
+        batch = selected_review_batch(records, args) if records is not None else None
+        if batch is None:
+            raise ValueError("rereview prompt requires a ReviewBatch")
+        qualifier = slugify(str(batch.data.get("review_batch_id")))
+        return current_round / "prompts" / "rereviews" / qualifier / f"{actor}{suffix}"
     return current_round / "prompts" / f"{args.phase}{suffix}"
 
 
@@ -191,6 +206,24 @@ def prompt_target(run: Path, args: PromptCommandInput, records: list[Record] | N
     if detect_run_layout(run) == DEFAULT_LAYOUT:
         return round_first_prompt_target(run, args, records)
     return run / "payloads" / "prompts" / prompt_filename(args)
+
+
+def raw_output_target(run: Path, args: PromptCommandInput, records: list[Record] | None = None) -> Path:
+    """Return the raw-output path paired with ``prompt_target()``."""
+    if detect_run_layout(run) != DEFAULT_LAYOUT:
+        filename = prompt_filename(args).removesuffix(".md") + ".out"
+        return run / "payloads" / "raw" / filename
+    current_round = round_dir(run, args.round)
+    actor = slugify(args.actor or args.phase)
+    if args.phase == "author":
+        return current_round / "raw" / "author.out"
+    if args.phase == "validator":
+        return current_round / "raw" / "validators" / f"{actor}.out"
+    if args.phase in {"reviewer", "rereview"}:
+        prompt = round_first_prompt_target(run, args, records)
+        prompt_relative = prompt.relative_to(current_round / "prompts")
+        return (current_round / "raw" / prompt_relative).with_suffix(".out")
+    return current_round / "raw" / f"{slugify(args.phase)}-{actor}.out"
 
 
 def proposed_conclusion_for_finding(record: Record) -> str:
@@ -222,15 +255,15 @@ def table_cell(value: Any) -> str:
 
 def conclusion_validation_table(records: list[Record], batch: Record) -> list[str]:
     source_ids = [str(value) for value in batch.data.get("source_finding_ids") or []]
-    canonical = {
-        str(record.data.get("canonical_finding_id")): record for record in records_by_type(records, "CanonicalFinding")
+    normalized_by_id = {
+        str(record.data.get("normalized_finding_id")): record for record in records_by_type(records, "NormalizedFinding")
     }
     rows = [
-        "| canonical_finding_id | proposed_conclusion | source_raw_finding_ids | scope | blocking | materiality | lifecycle | claim | rationale |",
+        "| normalized_finding_id | proposed_conclusion | source_raw_finding_ids | scope | blocking | materiality | lifecycle | claim | rationale |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for finding_id in source_ids:
-        record = canonical.get(finding_id)
+        record = normalized_by_id.get(finding_id)
         if record is None:
             rows.append(f"| {finding_id} | unclear | [] | missing | missing | missing | missing | missing | missing |")
             continue
@@ -319,13 +352,13 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
                 [
                     "## Conclusion Validation",
                     "",
-                    "This is not a fresh review. Validate the normalized canonical superset and proposed conclusions only.",
+                    "This is not a fresh review. Validate the normalized finding superset and proposed conclusions only.",
                     "",
-                    "Allowed reviewer decisions per CanonicalFinding: `agree`, `disagree`, or `needs_human`.",
+                    "Allowed reviewer decisions per NormalizedFinding: `agree`, `disagree`, or `needs_human`.",
                     "",
                     "Every decision must include explanation or argumentation. The decision enum alone is not sufficient protocol evidence.",
                     "",
-                    "For each listed finding, output `canonical_finding_id`, `reviewer_decision`, `rationale`, `evidence_refs`, `corrected_conclusion`, and `needs_human_reason`.",
+                    "For each listed finding, output `normalized_finding_id`, `reviewer_decision`, `rationale`, `evidence_refs`, `corrected_conclusion`, and `needs_human_reason`.",
                     "",
                     "`agree` still requires rationale explaining why the proposed conclusion is supported.",
                     "",
@@ -358,7 +391,7 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
                 [
                     "## Reviewer Instructions",
                     "",
-                    "Validate each listed CanonicalFinding conclusion. Do not look for unrelated new findings.",
+                    "Validate each listed NormalizedFinding conclusion. Do not look for unrelated new findings.",
                     "",
                     "Return machine-readable output. Each row or object must include rationale/argumentation for `agree`, `disagree`, and `needs_human`.",
                     "",
@@ -402,7 +435,7 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
             [
                 "## Author Response Instructions",
                 "",
-                "Respond to every in-scope blocking material CanonicalFinding with accept, reject, partially_accept, or request_clarification.",
+                "Respond to every in-scope blocking material NormalizedFinding with accept, reject, partially_accept, or request_clarification.",
                 "",
             ]
         )
@@ -422,7 +455,7 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
                 "",
                 "Produce report.md. Start with human-readable finding blocks that separate Problem, Explanation, and Required action.",
                 "Then include reviewer statistics, discarded/agreed finding summaries, and parseable TerminationRecord and FinalReport sections.",
-                "The FinalReport section must match the TerminationRecord and explicitly declare unresolved CanonicalFinding ids.",
+                "The FinalReport section must match the TerminationRecord and explicitly declare unresolved NormalizedFinding ids.",
                 "",
             ]
         )

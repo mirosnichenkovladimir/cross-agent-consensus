@@ -27,6 +27,7 @@ from cross_agent_consensus.layout import required_run_paths, round_dir  # noqa: 
 from cross_agent_consensus.records import parse_run_records, records_by_type  # noqa: E402
 from cross_agent_consensus.run_macro import (  # noqa: E402
     ActorPlan,
+    _build_plan,
     _emit_manual_fallback,
     _fallback_lines_for_plan,
     _resolve_actors,
@@ -42,7 +43,7 @@ def _build_init_args(tmp: Path, *, reviewers: list[str], unattended_scope=None) 
         orchestrator="orchestrator",
         author="author",
         reviewer=reviewers,
-        artifact_locator="artifact.md",
+        artifact_locator=str(tmp / "artifact.md"),
         success_criterion=[],
         task="design retry-backoff",
         run_id=None,
@@ -73,6 +74,7 @@ def _stage_run(tmp: Path, *, reviewers: list[str], unattended_scope=None) -> Pat
     """
 
     args = _build_init_args(tmp, reviewers=reviewers, unattended_scope=unattended_scope)
+    (tmp / "artifact.md").write_text("reviewed artifact\n", encoding="utf-8")
     run_id = "sample-consensus-001"
     files = build_init_files(args, run_id, "2026-06-04T00:00:00Z")
     for path, content in files.items():
@@ -104,7 +106,7 @@ def _append_config_resolution(run: Path, reviewer_commands: dict[str, list[str]]
     }
     data = {
         "record_type": "ConfigResolution",
-        "schema_version": "m2-markdown-1",
+        "schema_version": "m2-markdown-2",
         "run_id": run.name,
         "actor_identity": "orchestrator-config-tool",
         "created_at": "2026-06-04T00:00:00Z",
@@ -119,6 +121,58 @@ def _append_config_resolution(run: Path, reviewer_commands: dict[str, list[str]]
     existing = target.read_text(encoding="utf-8")
     block = "\n\n## ConfigResolution config-resolution-test\n" + frontmatter(data) + "\n"
     target.write_text(existing + block, encoding="utf-8")
+
+
+def _append_batch_scoped_review(run: Path) -> tuple[str, Path, Path]:
+    """Add a second same-round batch and return its expected evidence paths."""
+
+    from cross_agent_consensus.markdown_records import frontmatter
+
+    artifact_data = {
+        "record_type": "ArtifactVersion",
+        "schema_version": "m2-markdown-2",
+        "run_id": run.name,
+        "actor_identity": "author",
+        "created_at": "2026-06-04T00:01:00Z",
+        "artifact_version_id": "v2",
+        "predecessor_id_or_null": "v1",
+        "content_locator": "artifact-v2.md",
+        "content_hash_or_null": None,
+        "produced_by": "author",
+    }
+    (run / "artifacts" / "v2.md").write_text(
+        frontmatter(artifact_data) + "\n\n# Artifact Version v2\n",
+        encoding="utf-8",
+    )
+    (run / "artifact-v2.md").write_text("revised artifact\n", encoding="utf-8")
+    batch_id = "review-batch-round-1-remediation_verification"
+    batch_data = {
+        "record_type": "ReviewBatch",
+        "schema_version": "m2-markdown-2",
+        "run_id": run.name,
+        "actor_identity": "orchestrator",
+        "created_at": "2026-06-04T00:02:00Z",
+        "review_batch_id": batch_id,
+        "review_scope_id": f"review-scope-{run.name}",
+        "review_mode": "remediation_verification",
+        "target_artifact_version_id": "v2",
+        "source_finding_ids": ["normalized-finding-001"],
+        "round_id": "round-1",
+        "round_path": "rounds/round-001",
+        "expected_reviewer_identities": ["codex"],
+    }
+    round_path = round_dir(run, "round-1") / "round.md"
+    round_path.write_text(
+        round_path.read_text(encoding="utf-8")
+        + f"\n\n## ReviewBatch {batch_id}\n"
+        + frontmatter(batch_data)
+        + "\n",
+        encoding="utf-8",
+    )
+    batch_component = "review-batch-round-1-remediation-verification"
+    prompt = round_dir(run, "round-1") / "prompts" / "reviewers" / batch_component / "codex.md"
+    raw_output = round_dir(run, "round-1") / "raw" / "reviewers" / batch_component / "codex.out"
+    return batch_id, prompt, raw_output
 
 
 def _run_args(run: Path, **overrides) -> argparse.Namespace:
@@ -156,6 +210,26 @@ class ResolveActorsTests(unittest.TestCase):
             records = parse_run_records(run)
             actors = _resolve_actors(records, round_id="round-1", phase="reviewer", requested=None)
         self.assertEqual(sorted(actors), ["claude", "codex"])
+
+    def test_reviewer_phase_matches_padded_batch_round_and_expected_identities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _stage_run(Path(tmp_name), reviewers=["codex", "claude"])
+            round_record = round_dir(run, "round-1") / "round.md"
+            round_record.write_text(
+                round_record.read_text(encoding="utf-8")
+                .replace("round_id: round-1", "round_id: round-001")
+                .replace("source_finding_ids: []", "source_finding_ids: []\nexpected_reviewer_identities: [codex]"),
+                encoding="utf-8",
+            )
+
+            actors = _resolve_actors(
+                parse_run_records(run),
+                round_id="round-1",
+                phase="reviewer",
+                requested=None,
+            )
+
+        self.assertEqual(actors, ["codex"])
 
     def test_validator_phase_uses_policy_required_validators(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -254,6 +328,105 @@ class DryRunTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+
+    def test_rereview_plan_uses_batch_scoped_rereview_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _stage_run(Path(tmp_name), reviewers=["codex"])
+            batch_id, _prompt, _raw = _append_batch_scoped_review(run)
+            records = parse_run_records(run)
+
+            plan = _build_plan(
+                records,
+                run,
+                round_id="round-1",
+                phase="rereview",
+                actor="codex",
+                cwd=str(run),
+                idle_timeout_seconds=30.0,
+                stale_timeout_seconds=60.0,
+                heartbeat_interval_seconds=1.0,
+            )
+
+        batch_component = "review-batch-round-1-remediation-verification"
+        self.assertEqual(plan.review_batch_id, batch_id)
+        self.assertEqual(
+            plan.prompt_path,
+            round_dir(run, "round-1") / "prompts" / "rereviews" / batch_component / "codex.md",
+        )
+        self.assertEqual(
+            plan.raw_output_path,
+            round_dir(run, "round-1") / "raw" / "rereviews" / batch_component / "codex.out",
+        )
+
+    def test_padded_batch_round_id_is_selected_for_unpadded_round_argument(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _stage_run(Path(tmp_name), reviewers=["codex"])
+            batch_id, _prompt, _raw = _append_batch_scoped_review(run)
+            round_path = round_dir(run, "round-1") / "round.md"
+            round_path.write_text(
+                round_path.read_text(encoding="utf-8").replace(
+                    "round_id: round-1\nround_path: rounds/round-001\nexpected_reviewer_identities:\n  - codex\n",
+                    "round_id: round-001\nround_path: rounds/round-001\nexpected_reviewer_identities:\n  - codex\n",
+                ),
+                encoding="utf-8",
+            )
+
+            plan = _build_plan(
+                parse_run_records(run),
+                run,
+                round_id="round-1",
+                phase="reviewer",
+                actor="codex",
+                cwd=str(run),
+                idle_timeout_seconds=30.0,
+                stale_timeout_seconds=60.0,
+                heartbeat_interval_seconds=1.0,
+            )
+
+        self.assertEqual(plan.review_batch_id, batch_id)
+        self.assertEqual(plan.artifact_version_id, "v2")
+
+    def test_second_same_round_batch_uses_batch_prompt_raw_path_and_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            run = _stage_run(tmp, reviewers=["codex"])
+            _append_config_resolution(
+                run,
+                {"codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"]},
+            )
+            batch_id, expected_prompt, expected_raw_output = _append_batch_scoped_review(run)
+            captured: dict[str, object] = {}
+
+            def fake_invoke(args):
+                captured["invoke"] = args
+                captured["prompt_existed_at_invocation"] = Path(args.prompt).is_file()
+                Path(args.raw_output).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.raw_output).write_text("ok\n", encoding="utf-8")
+                return 0
+
+            def fake_capture(args):
+                captured["capture"] = args
+                return 0
+
+            with (
+                mock.patch(
+                    "cross_agent_consensus.invocation.process_monitor.cmd_invoke_agent",
+                    side_effect=fake_invoke,
+                ),
+                mock.patch("cross_agent_consensus.capture.cmd_capture", side_effect=fake_capture),
+            ):
+                rc, stdout, _stderr = _capture_run(
+                    _run_args(run, execute_reviewers=True, approved=True)
+                )
+
+        self.assertEqual(rc, 0, stdout)
+        invoke_args = captured["invoke"]
+        capture_args = captured["capture"]
+        self.assertTrue(captured["prompt_existed_at_invocation"])
+        self.assertEqual(Path(invoke_args.prompt), expected_prompt)
+        self.assertEqual(Path(invoke_args.raw_output), expected_raw_output)
+        self.assertEqual(capture_args.review_batch, batch_id)
+        self.assertEqual(capture_args.artifact_version, "v2")
 
     def test_execute_without_approved_exits_one_and_prints_manual(self) -> None:
         """Truth-table row: --approved=no → exits 1, prints manual commands."""

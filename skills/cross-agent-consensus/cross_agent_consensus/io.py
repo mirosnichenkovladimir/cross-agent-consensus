@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -97,7 +98,12 @@ def atomic_write_new(path: Path, content: str, mode: int | None = None) -> None:
 def append_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(content)
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            fh.write(content)
+            fh.flush()
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def write_bytes_new(path: Path, data: bytes) -> None:
@@ -131,9 +137,7 @@ def read_json_file(path: Path) -> dict[str, Any]:
 
 
 def append_jsonl(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(data, sort_keys=True) + "\n")
+    append_text(path, json.dumps(data, sort_keys=True) + "\n")
 
 
 def compact_json_value(value: Any, *, max_string: int = 2000, max_items: int = 50) -> Any:

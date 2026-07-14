@@ -13,7 +13,16 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
-from cross_agent_consensus.io import append_jsonl, atomic_write_new, eprint, read_json_file, utc_now, write_bytes_new
+from cross_agent_consensus.io import (
+    append_jsonl,
+    atomic_write_new,
+    eprint,
+    read_json_file,
+    sha256_file,
+    utc_now,
+    write_bytes_new,
+)
+from cross_agent_consensus.approval import ensure_invocation_approval, verify_invocation_approval
 from cross_agent_consensus.models import (
     AgentInvocation,
     AgentSessionPaths,
@@ -55,6 +64,27 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
 DEFAULT_STALE_TIMEOUT_SECONDS = 1200.0
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
 DEFAULT_CANCEL_GRACE_SECONDS = 10.0
+
+
+def _sha256_or_none(path: Path) -> str | None:
+    return sha256_file(path) if path.is_file() else None
+
+
+def completed_session_evidence_digests(
+    invocation: AgentInvocation,
+    paths: AgentSessionPaths,
+) -> dict[str, str | None]:
+    """Hash the immutable inputs and outputs of a completed supervised session."""
+
+    return {
+        "invocation_sha256": _sha256_or_none(paths.invocation),
+        "command_sha256": _sha256_or_none(paths.command),
+        "prompt_sha256": _sha256_or_none(paths.prompt),
+        "stdout_sha256": _sha256_or_none(paths.stdout),
+        "stderr_sha256": _sha256_or_none(paths.stderr),
+        "raw_output_sha256": _sha256_or_none(invocation.raw_output_path),
+        "final_output_sha256_or_null": _sha256_or_none(paths.final_output),
+    }
 
 
 def current_process_identity(pid: int) -> dict[str, Any] | None:
@@ -120,9 +150,7 @@ def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPath
     round_id = padded_round_id(args.round)
     prompt_path = Path(args.prompt)
     raw_output_path = Path(args.raw_output)
-    cwd = Path(args.cwd).expanduser()
-    if not cwd.is_absolute():
-        cwd = (Path.cwd() / cwd).resolve()
+    cwd = Path(args.cwd).expanduser().resolve()
     return AgentInvocation(
         run=Path(args.run),
         round_id=round_id,
@@ -372,6 +400,11 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
             signal_or_null=signal_number,
             started_monotonic=started_monotonic,
             failure_reason_or_null=failure_reason,
+            evidence_digests=(
+                completed_session_evidence_digests(invocation, paths)
+                if final_state == "completed"
+                else None
+            ),
         )
         return 0 if final_state == "completed" else 4
     except Exception as exc:
@@ -385,9 +418,40 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
         return 1
 
 
+def exact_invocation_approval(
+    args: InvocationCommandInput,
+    command: list[str],
+    *,
+    require_existing: bool,
+) -> dict[str, Any]:
+    if require_existing:
+        return verify_invocation_approval(
+            Path(args.run),
+            actor_identity=args.actor,
+            player_id=args.player,
+            phase=args.phase,
+            round_id=args.round,
+            prompt_path=Path(args.prompt),
+            command=command,
+            working_directory=args.cwd,
+        )
+    return ensure_invocation_approval(
+        Path(args.run),
+        actor_identity=args.actor,
+        player_id=args.player,
+        phase=args.phase,
+        round_id=args.round,
+        prompt_path=Path(args.prompt),
+        command=command,
+        working_directory=args.cwd,
+        mechanism="cli_approved_flag" if args.approved else "policy_unattended",
+    )
+
+
 def cmd_invoke_agent(args: InvocationCommandInput) -> int:
     run = Path(args.run)
     command = runtime_command(args.command)
+    require_existing_approval = bool(getattr(args, "require_existing_approval", False))
     try:
         if args.stale_timeout_seconds < args.idle_timeout_seconds:
             raise ValueError("--stale-timeout-seconds must be greater than or equal to --idle-timeout-seconds")
@@ -409,9 +473,39 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             for message in trusted_dir_messages:
                 eprint(f"error: {message}")
             return 3
+        preverified_approval: dict[str, Any] | None = None
+        if require_existing_approval:
+            try:
+                preverified_approval = exact_invocation_approval(
+                    args,
+                    command,
+                    require_existing=True,
+                )
+            except ValueError as exc:
+                eprint(f"error: {exc}")
+                return 3
         invocation, paths, command_spec = prepare_agent_session(args, command)
         print(f"session: {paths.session}")
         if invocation.player_id == "manual":
+            approval_binding: dict[str, Any] | None = None
+            if args.approved:
+                try:
+                    approval_binding = preverified_approval or exact_invocation_approval(
+                        args, command, require_existing=False
+                    )
+                except ValueError as exc:
+                    record_failed_agent_session(paths, invocation, str(exc))
+                    eprint(f"error: {exc}")
+                    return 3
+            if (
+                approval_binding is not None
+                and paths.prompt.is_file()
+                and sha256_file(paths.prompt) != approval_binding["prompt_sha256"]
+            ):
+                reason = "session prompt copy does not match OperatorApproval"
+                record_failed_agent_session(paths, invocation, reason)
+                eprint(f"error: {reason}")
+                return 3
             manual_command = command_for_display(command) if command else "(no command supplied)"
             atomic_write_new(paths.session / "manual-command.md", manual_command + "\n")
             if paths.prompt.is_file():
@@ -445,6 +539,19 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             record_failed_agent_session(paths, invocation, reason)
             for message in messages:
                 eprint(f"error: {message}")
+            return 3
+        try:
+            approval_binding = preverified_approval or exact_invocation_approval(
+                args, command, require_existing=False
+            )
+        except ValueError as exc:
+            record_failed_agent_session(paths, invocation, str(exc))
+            eprint(f"error: {exc}")
+            return 3
+        if not paths.prompt.is_file() or sha256_file(paths.prompt) != approval_binding["prompt_sha256"]:
+            reason = "session prompt copy does not match OperatorApproval"
+            record_failed_agent_session(paths, invocation, reason)
+            eprint(f"error: {reason}")
             return 3
         return run_generic_agent(invocation, paths, command_spec)
     except Exception as exc:

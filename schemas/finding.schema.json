@@ -1,19 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/cross-model-consensus/finding.schema.json",
-  "title": "CanonicalFinding",
+  "title": "NormalizedFinding",
   "type": "object",
-  "required": ["id", "artifact_version", "raw_finding_ids", "severity", "materiality", "status", "claim"],
+  "required": [
+    "normalized_finding_id",
+    "target_artifact_version_id",
+    "source_raw_finding_ids",
+    "normalization_record_id",
+    "materiality",
+    "materiality_status",
+    "scope_classification",
+    "blocking_status",
+    "lifecycle_state",
+    "claim",
+    "rationale_or_summary",
+    "clarification_pending"
+  ],
+  "additionalProperties": false,
   "properties": {
-    "id": {"type": "string"},
-    "artifact_version": {"type": "string"},
-    "raw_finding_ids": {"type": "array", "items": {"type": "string"}},
-    "severity": {"enum": ["blocker", "important", "minor", "taste", "question"]},
+    "normalized_finding_id": {"type": "string", "minLength": 1},
+    "target_artifact_version_id": {"type": "string", "minLength": 1},
+    "source_raw_finding_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "normalization_record_id": {"type": "string", "minLength": 1},
     "materiality": {"enum": ["material", "non_material", "unknown"]},
-    "status": {"type": "string"},
-    "location": {"type": "string"},
-    "claim": {"type": "string"},
-    "evidence": {"type": "string"},
-    "suggested_fix": {"type": "string"}
+    "materiality_status": {"enum": ["undisputed", "disputed_materiality", "resolved_after_dispute"]},
+    "scope_classification": {"enum": ["in_scope", "out_of_scope", "unclear_scope"]},
+    "blocking_status": {"enum": ["blocking", "non_blocking", "deferred", "promoted_by_human"]},
+    "lifecycle_state": {"type": "string", "minLength": 1},
+    "claim": {"type": "string", "minLength": 1},
+    "rationale_or_summary": {"type": "string", "minLength": 1},
+    "clarification_pending": {"type": "boolean"}
   }
 }

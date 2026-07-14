@@ -46,7 +46,7 @@ Review-mode rules:
 
 Conclusion-validation rule:
 
-When ReviewBatch mode is `scope_triage` and the prompt provides a Canonical Finding conclusion table, this is not a fresh review. Validate only the listed Canonical Findings and proposed conclusions. For each listed finding, answer with `agree`, `disagree`, or `needs_human`. Every answer must include rationale or argumentation and evidence references. `disagree` requires a corrected conclusion. `needs_human` requires the reason human authority is needed.
+When ReviewBatch mode is `scope_triage` and the prompt provides a Normalized Finding conclusion table, this is not a fresh review. Validate only the listed Normalized Findings and proposed conclusions. For each listed finding, answer with `agree`, `disagree`, or `needs_human`. Every answer must include rationale or argumentation and evidence references. `disagree` requires a corrected conclusion. `needs_human` requires the reason human authority is needed.
 
 For each finding, provide:
 
@@ -66,12 +66,12 @@ Reviewer comments are claims, not commands. Avoid taste-only feedback unless lab
 
 Conclusion-validation output table:
 
-| canonical_finding_id | reviewer_decision | rationale | evidence_refs | corrected_conclusion | needs_human_reason |
+| normalized_finding_id | reviewer_decision | rationale | evidence_refs | corrected_conclusion | needs_human_reason |
 | --- | --- | --- | --- | --- | --- |
 
 ## Author Response Prompt
 
-You are the Author Agent responding to CanonicalFindings.
+You are the Author Agent responding to NormalizedFindings.
 
 For every in-scope blocking material finding, respond with exactly one:
 
@@ -90,7 +90,7 @@ Rules:
 
 Output table:
 
-| canonical_finding_id | response_type | rationale | planned_change | resulting_artifact_version_id_or_null |
+| normalized_finding_id | response_type | rationale | planned_change | resulting_artifact_version_id_or_null |
 | --- | --- | --- | --- | --- |
 
 ## Re-Review Prompt
@@ -101,7 +101,7 @@ Inspect:
 
 - ReviewScope;
 - ReviewBatch mode;
-- CanonicalFinding;
+- NormalizedFinding;
 - linked RawFindings;
 - AuthorResponse;
 - revised ArtifactVersion, if any;
@@ -119,7 +119,7 @@ Decision values:
 
 For each finding, output:
 
-| canonical_finding_id | decision | rationale | artifact_version_id_or_null | remaining_material_risk |
+| normalized_finding_id | decision | rationale | artifact_version_id_or_null | remaining_material_risk |
 | --- | --- | --- | --- | --- |
 
 ## Final Report Prompt
@@ -141,4 +141,4 @@ Required sections:
 11. Terminal outcome for the declared scope.
 12. Human decision needed, if any.
 
-The report must state unresolved CanonicalFinding ids, or explicitly state that none remain.
+The report must state unresolved NormalizedFinding ids, or explicitly state that none remain.

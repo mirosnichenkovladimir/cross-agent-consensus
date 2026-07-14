@@ -9,6 +9,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.11.0] - 2026-07-14
+
+### Changed
+- Current protocol records, Python APIs, lifecycle evaluators, prompts,
+  reports, templates, and schemas use only `NormalizedFinding` and
+  `normalized_finding_id`. Newly normalized identifiers use the
+  `nf-round-<n>-<sequence>` form.
+- Current record output uses schema `m2-markdown-2`.
+
+### Compatibility
+- The version-gated load boundary converts historical `m2-markdown-1`
+  `CanonicalFinding` records and `canonical_finding_id` references into the
+  current model without changing identifier values.
+- Current-schema historical names, historical-schema current names, and runs
+  mixing historical and current finding records are rejected.
+
+## [0.10.0] - 2026-07-14
+
+### Added
+- Exact-input `OperatorApproval` bindings record the SHA-256 digest of each
+  approved prompt, runtime argv, working directory, and locally readable ArtifactVersion.
+  `invoke-agent` records a binding before launch, and `consensus run` records
+  one binding per selected actor.
+- `consensus validate --integrity` recomputes ArtifactVersion, raw reviewer
+  payload, validation payload, and approved prompt digests. `terminate` now
+  rejects drift before writing `report.md`.
+- `RawReviewerOutput` and `ValidationEvidence` written by `capture` include
+  `capture_origin`, payload digest, prompt digest, and exact supervised session
+  identity when the source came from `invoke-agent`. Completed sessions hash
+  `invocation.json`, `command.json`, the prompt, stdout, stderr, copied raw
+  output, and extracted final output; capture rejects substituted source bytes.
+- Successful run mutations append hash-chained `events.jsonl` entries with a
+  sequence, actor, event type, and derived lifecycle phase before and after the mutation.
+  `.cac-events-anchor.json` records the event count, tail digest, and journal
+  digest so deletion and suffix truncation fail validation. Approval events
+  also anchor the canonical `OperatorApproval` record digest.
+  `consensus status` prints the derived phase and event count;
+  `consensus validate --run-events` checks event sequences and phase
+  transitions.
+
+### Changed
+- Commands that mutate protocol records acquire the run-scoped `.cac.lock`.
+  Markdown and JSONL append helpers also take an advisory file lock.
+- Concurrent `consensus init` processes serialize run-id allocation and create
+  distinct `-NNN` directories instead of racing on an existence check. The
+  allocation lock lives inside the ignored run root rather than the repository root.
+- Local ArtifactVersion records preserve the directory used to resolve a
+  relative `content_locator`, allowing later validation from another working
+  directory.
+
+### Fixed
+- Hermes invocation self-tests request a wide enabled-only skill table so the
+  `cross-agent-consensus` name is not truncated and falsely reported missing.
+- `consensus run` selects the latest same-round ReviewBatch, uses its target
+  ArtifactVersion, and writes batch-scoped prompt/raw-output paths. A
+  conclusion-validation or remediation batch no longer reuses the first
+  fresh-review prompt and artifact.
+- Reviewer dispatch compares numeric round identities, so a ReviewBatch that
+  records `round-001` still limits `round-1` execution to its
+  `expected_reviewer_identities` instead of falling back to every participant.
+- Live-session integrity compares all ten `OperatorApproval` binding fields,
+  including round, prompt path, and artifact digest. An approval from another
+  round or prompt path cannot authorize a captured session.
+- Session and run-event integrity choose the 0.10 evidence contract from run
+  provenance and anchor presence, not from one mutable schema marker. Removing
+  `session-evidence-1` or relabeling version-2 events as legacy now fails
+  capture and validation instead of downgrading the integrity checks.
+- `invoke-agent --require-existing-approval` verifies the matching
+  `OperatorApproval` digest against the hash-chained run journal before it
+  allocates a session. Approval also hashes readable artifact bytes when an
+  `ArtifactVersion` omits `content_hash_or_null`.
+- Configured-CLI reviewer evidence must link to the exact successful session,
+  prompt, payload digest, artifact version, and `ReviewBatch` for 0.10 runs.
+  A completed session from another batch no longer satisfies terminal review
+  evidence.
+- Terminal blocker calculation requires unanimous decisions from every
+  expected reviewer in the latest applicable ReviewBatch. Decisions from
+  different batches cannot be combined, and a newer applicable batch keeps the
+  finding open before its first decision arrives. Mixed resolving decisions
+  remain disputed, and a later unresolved decision reopens a finding whose
+  earlier lifecycle value was resolved.
+- Re-review prompts and raw outputs use distinct batch-scoped `rereviews/`
+  paths. Re-review skeleton paths and record identifiers also include the
+  ReviewBatch identifier, allowing multiple remediation batches in one round.
+  ReviewBatch lookup and incremental normalization normalize `round-1` and
+  `round-001` before selecting records. Appending a later ReviewBatch no longer
+  relocates the first batch's prompt during session-evidence validation.
+- The first 0.10 mutation of a pre-0.10 run without `events.jsonl` retains the
+  legacy event schema instead of creating a version-2 journal without its
+  required `run_initialized` event.
+- `consensus terminate` atomically replaces the validated `report.md` skeleton,
+  so the documented `report` then `terminate` sequence completes instead of
+  failing because the report path already exists.
+- Repeated reviewer captures batch-qualify colliding `RawFinding` identifiers
+  and extract narrative findings from the supervised final answer instead of
+  the CLI JSON event stream.
+- `consensus normalize` appends only previously unnormalized `RawFinding`
+  records, so later review batches do not duplicate earlier normalized
+  findings or require overwriting `normalization.md`.
+
 ## [0.9.2] - 2026-07-13
 
 ### Fixed

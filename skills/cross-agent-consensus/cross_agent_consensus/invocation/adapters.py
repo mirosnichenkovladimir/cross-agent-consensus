@@ -349,8 +349,8 @@ _PLAYER_FACTORIES: dict[str, Any] = {
 
 
 def get_player_adapter(player_id: str) -> GenericCliPlayer | ManualPlayer:
-    canonical = PLAYER_ALIASES.get(player_id, player_id)
-    factory = _PLAYER_FACTORIES.get(canonical)
+    resolved_player_id = PLAYER_ALIASES.get(player_id, player_id)
+    factory = _PLAYER_FACTORIES.get(resolved_player_id)
     if factory is not None:
         return factory()
     aliases_hint = ", ".join(f"{alias} ({target})" for alias, target in PLAYER_ALIASES.items())
@@ -392,4 +392,3 @@ def cmd_players_probe(args: Any) -> int:
     except Exception as exc:
         eprint(f"error: {exc}")
         return 1
-

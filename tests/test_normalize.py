@@ -29,7 +29,7 @@ def _write_run(tmp_root: Path, raw_finding_specs: list[dict]) -> Path:
                 frontmatter(
                     {
                         "record_type": "ReviewBatch",
-                        "schema_version": "m2-markdown-1",
+                        "schema_version": "m2-markdown-2",
                         "run_id": "sample",
                         "actor_identity": "orchestrator",
                         "created_at": "2026-06-01T00:00:00Z",
@@ -53,7 +53,7 @@ def _write_run(tmp_root: Path, raw_finding_specs: list[dict]) -> Path:
             frontmatter(
                 {
                     "record_type": "RawFinding",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": "sample",
                     "actor_identity": "orchestrator",
                     "created_at": "2026-06-01T00:00:00Z",
@@ -77,7 +77,7 @@ def _write_run(tmp_root: Path, raw_finding_specs: list[dict]) -> Path:
 
 
 class NormalizeTests(unittest.TestCase):
-    def test_skeleton_emits_one_normalization_and_canonical_per_raw_finding(self) -> None:
+    def test_skeleton_emits_one_normalization_and_normalized_per_raw_finding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             specs = [
                 {"raw_finding_id": f"rf-{index:03d}", "claim": f"problem {index}", "location": f"file-{index}"}
@@ -88,10 +88,25 @@ class NormalizeTests(unittest.TestCase):
             body = build_normalization_skeleton(run, "round-1")
 
         self.assertEqual(body.count("## NormalizationRecord "), 5)
-        self.assertEqual(body.count("## CanonicalFinding "), 5)
+        self.assertEqual(body.count("## NormalizedFinding "), 5)
+        self.assertNotIn("CanonicalFinding", body)
+        self.assertNotIn("canonical_finding_id", body)
         for index in range(1, 6):
-            self.assertIn(f"canonical_finding_id: cf-round-1-{index:03d}", body)
-            self.assertIn(f"normalization_record_id: normalization-cf-round-1-{index:03d}", body)
+            self.assertIn(f"normalized_finding_id: nf-round-1-{index:03d}", body)
+            self.assertIn(f"normalization_record_id: normalization-nf-round-1-{index:03d}", body)
+
+    def test_skeleton_accepts_padded_review_batch_round_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run(Path(tmp_name), [{"raw_finding_id": "rf-001"}])
+            run_md = run / "run.md"
+            run_md.write_text(
+                run_md.read_text(encoding="utf-8").replace("round_id: round-1", "round_id: round-001"),
+                encoding="utf-8",
+            )
+
+            body = build_normalization_skeleton(run, "round-1")
+
+        self.assertIn("normalized_finding_id: nf-round-1-001", body)
 
     def test_skeleton_passes_record_parser(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -104,9 +119,9 @@ class NormalizeTests(unittest.TestCase):
             records = parse_records_from_file(target)
 
         normalization = records_by_type(records, "NormalizationRecord")
-        canonical = records_by_type(records, "CanonicalFinding")
+        normalized = records_by_type(records, "NormalizedFinding")
         self.assertEqual(len(normalization), 2)
-        self.assertEqual(len(canonical), 2)
+        self.assertEqual(len(normalized), 2)
         for record in normalization:
             for field in [
                 "normalization_record_id",
@@ -116,10 +131,10 @@ class NormalizeTests(unittest.TestCase):
                 "scope_classification",
                 "blocking_status",
                 "rationale",
-                "canonical_finding_id",
+                "normalized_finding_id",
             ]:
                 self.assertIn(field, record.data, f"{field} missing in {record.data}")
-        for record in canonical:
+        for record in normalized:
             self.assertEqual(record.data["lifecycle_state"], "open")
             self.assertEqual(record.data["materiality_status"], "undisputed")
 
@@ -137,9 +152,9 @@ class NormalizeTests(unittest.TestCase):
             target.write_text(body, encoding="utf-8")
             records = parse_records_from_file(target)
 
-        canonical = records_by_type(records, "CanonicalFinding")
-        self.assertEqual(len(canonical), 2)
-        bucketed = [record for record in canonical if len(record.data["source_raw_finding_ids"]) == 2]
+        normalized = records_by_type(records, "NormalizedFinding")
+        self.assertEqual(len(normalized), 2)
+        bucketed = [record for record in normalized if len(record.data["source_raw_finding_ids"]) == 2]
         self.assertEqual(len(bucketed), 1)
         self.assertEqual(set(bucketed[0].data["source_raw_finding_ids"]), {"rf-001", "rf-002"})
 
@@ -158,11 +173,60 @@ class NormalizeTests(unittest.TestCase):
             target = run / "rounds" / "round-001" / "normalization.md"
             self.assertTrue(target.exists())
 
-            # Without --overwrite the second run must refuse.
-            self.assertEqual(cmd_normalize(args), 1)
+            # Without --overwrite the second run is idempotent.
+            original = target.read_text(encoding="utf-8")
+            self.assertEqual(cmd_normalize(args), 0)
+            self.assertEqual(target.read_text(encoding="utf-8"), original)
 
             args.overwrite = True
             self.assertEqual(cmd_normalize(args), 0)
+
+    def test_cmd_normalize_appends_only_new_raw_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run(Path(tmp_name), [{"raw_finding_id": "rf-001"}])
+            args = argparse.Namespace(
+                run=str(run),
+                round="round-1",
+                actor="orchestrator-consensus-tool",
+                merge_overlap=False,
+                overwrite=False,
+            )
+            self.assertEqual(cmd_normalize(args), 0)
+            review_path = run / "rounds" / "round-001" / "reviews" / "codex.md"
+            review_path.write_text(
+                review_path.read_text(encoding="utf-8")
+                + "\n## RawFinding rf-002\n"
+                + frontmatter(
+                    {
+                        "record_type": "RawFinding",
+                        "schema_version": "m2-markdown-2",
+                        "run_id": "sample",
+                        "actor_identity": "orchestrator",
+                        "created_at": "2026-06-01T00:01:00Z",
+                        "raw_finding_id": "rf-002",
+                        "reviewer_identity": "reviewer-codex",
+                        "artifact_version_id": "v1",
+                        "review_batch_id": "rb-001",
+                        "location": "new.py",
+                        "claim": "new defect",
+                        "evidence": "new evidence",
+                        "severity_or_materiality_claim": "high",
+                        "scope_classification": "in_scope",
+                        "blocking_status": "blocking",
+                        "suggested_fix_or_null": None,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(cmd_normalize(args), 0)
+            target = run / "rounds" / "round-001" / "normalization.md"
+            records = parse_records_from_file(target)
+
+        normalized = records_by_type(records, "NormalizedFinding")
+        self.assertEqual([record.data["normalized_finding_id"] for record in normalized], ["nf-round-1-001", "nf-round-1-002"])
+        self.assertEqual(normalized[1].data["source_raw_finding_ids"], ["rf-002"])
 
     def test_cmd_normalize_silently_replaces_init_stub_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

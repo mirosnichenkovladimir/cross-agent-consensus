@@ -39,7 +39,7 @@ def normalize_round_id(value: str | None) -> str:
 
     Accepts ``None`` (defaults to round 1), a bare integer string (``"1"``),
     a short id (``"round-1"``), or a zero-padded long form (``"round-001"``)
-    and resolves all of them to the same canonical ``"round-N"`` short id.
+    and normalizes all of them to the same ``"round-N"`` short id.
     The on-disk directory format remains zero-padded (``round-001``) via
     :func:`round_dir`; record `round_id` fields use the short form.
     """

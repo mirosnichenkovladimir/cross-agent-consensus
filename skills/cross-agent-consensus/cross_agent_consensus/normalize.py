@@ -1,4 +1,4 @@
-"""Skeleton generator for NormalizationRecord and CanonicalFinding blocks."""
+"""Skeleton generator for NormalizationRecord and NormalizedFinding blocks."""
 
 from __future__ import annotations
 
@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from cross_agent_consensus.init import INIT_STUB_NORMALIZATION
-from cross_agent_consensus.io import atomic_write_new, eprint, utc_now
+from cross_agent_consensus.io import append_text, atomic_write_new, eprint, utc_now
 from cross_agent_consensus.layout import normalize_round_id, round_dir
 from cross_agent_consensus.markdown_records import frontmatter
 from cross_agent_consensus.models import Record
-from cross_agent_consensus.records import canonical_finding_ids, parse_run_records, records_by_type
+from cross_agent_consensus.records import normalized_finding_ids, parse_run_records, records_by_type
+from cross_agent_consensus.run_audit import locked_run_command
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -36,37 +37,43 @@ def _round_id_by_review_batch(records: list[Record]) -> dict[str, str]:
         batch_id = record.data.get("review_batch_id")
         round_id = record.data.get("round_id")
         if batch_id and round_id:
-            mapping[str(batch_id)] = str(round_id)
+            mapping[str(batch_id)] = normalize_round_id(str(round_id))
     return mapping
 
 
-def _existing_canonical_numbers(records: list[Record], round_id: str) -> set[int]:
-    pattern = re.compile(r"^cf-" + re.escape(round_id) + r"-(\d+)$")
+def _existing_normalized_numbers(records: list[Record], round_id: str) -> set[int]:
+    pattern = re.compile(r"^nf-" + re.escape(round_id) + r"-(\d+)$")
     numbers: set[int] = set()
-    for canonical_id in canonical_finding_ids(records):
-        match = pattern.match(canonical_id)
+    for normalized_id in normalized_finding_ids(records):
+        match = pattern.match(normalized_id)
         if match:
             numbers.add(int(match.group(1)))
     return numbers
 
 
-def _next_canonical_id(round_id: str, used: set[int]) -> str:
+def _next_normalized_id(round_id: str, used: set[int]) -> str:
     number = 1
     while number in used:
         number += 1
     used.add(number)
-    return f"cf-{round_id}-{number:03d}"
+    return f"nf-{round_id}-{number:03d}"
 
 
 def _raw_findings_for_round(records: list[Record], round_id: str) -> list[Record]:
     batch_to_round = _round_id_by_review_batch(records)
     target = normalize_round_id(round_id)
+    normalized_raw_ids = {
+        str(raw_id)
+        for record in records_by_type(records, "NormalizationRecord")
+        for raw_id in (record.data.get("source_raw_finding_ids") or [])
+    }
     findings: list[Record] = []
     for record in records_by_type(records, "RawFinding"):
         batch_id = record.data.get("review_batch_id")
         if not batch_id:
             continue
-        if batch_to_round.get(str(batch_id)) == target:
+        raw_finding_id = str(record.data.get("raw_finding_id") or "")
+        if batch_to_round.get(str(batch_id)) == target and raw_finding_id not in normalized_raw_ids:
             findings.append(record)
     return findings
 
@@ -116,11 +123,11 @@ def _render_normalization_block(
     created_at: str,
     round_id: str,
     bucket: list[Record],
-    canonical_id: str,
+    normalized_id: str,
 ) -> str:
     primary = bucket[0]
     raw_ids = [str(finding.data.get("raw_finding_id")) for finding in bucket if finding.data.get("raw_finding_id")]
-    normalization_id = f"normalization-{canonical_id}"
+    normalization_id = f"normalization-{normalized_id}"
     materiality = primary.data.get("severity_or_materiality_claim") or "# TODO: set materiality"
     is_merged = len(bucket) > 1
     rationale = "# TODO: merge across raw findings" if is_merged else "# TODO: merge with reviewer claim"
@@ -128,7 +135,7 @@ def _render_normalization_block(
         heading=f"NormalizationRecord {normalization_id}",
         frontmatter_data={
             "record_type": "NormalizationRecord",
-            "schema_version": "m2-markdown-1",
+            "schema_version": "m2-markdown-2",
             "run_id": run_id,
             "actor_identity": actor,
             "created_at": created_at,
@@ -140,7 +147,7 @@ def _render_normalization_block(
             "scope_classification": primary.data.get("scope_classification") or "in_scope",
             "blocking_status": primary.data.get("blocking_status") or "non_blocking",
             "rationale": rationale,
-            "canonical_finding_id": canonical_id,
+            "normalized_finding_id": normalized_id,
         },
         notes_heading="Normalization Notes",
         notes_lines=[
@@ -150,17 +157,17 @@ def _render_normalization_block(
     )
 
 
-def _render_canonical_block(
+def _render_normalized_finding_block(
     *,
     run_id: str,
     actor: str,
     created_at: str,
     bucket: list[Record],
-    canonical_id: str,
+    normalized_id: str,
 ) -> str:
     primary = bucket[0]
     raw_ids = [str(finding.data.get("raw_finding_id")) for finding in bucket if finding.data.get("raw_finding_id")]
-    normalization_id = f"normalization-{canonical_id}"
+    normalization_id = f"normalization-{normalized_id}"
     claim = primary.data.get("claim") or "# TODO: copy claim"
     is_merged = len(bucket) > 1
     if is_merged:
@@ -169,14 +176,14 @@ def _render_canonical_block(
         rationale_or_summary = f"# TODO: merge\n\n{primary.data.get('evidence') or ''}".rstrip()
     materiality = primary.data.get("severity_or_materiality_claim") or "# TODO: set materiality"
     return _render_record_block(
-        heading=f"CanonicalFinding {canonical_id}",
+        heading=f"NormalizedFinding {normalized_id}",
         frontmatter_data={
-            "record_type": "CanonicalFinding",
-            "schema_version": "m2-markdown-1",
+            "record_type": "NormalizedFinding",
+            "schema_version": "m2-markdown-2",
             "run_id": run_id,
             "actor_identity": actor,
             "created_at": created_at,
-            "canonical_finding_id": canonical_id,
+            "normalized_finding_id": normalized_id,
             "target_artifact_version_id": primary.data.get("artifact_version_id") or "# TODO: artifact version",
             "source_raw_finding_ids": raw_ids,
             "normalization_record_id": normalization_id,
@@ -189,7 +196,7 @@ def _render_canonical_block(
             "rationale_or_summary": rationale_or_summary,
             "clarification_pending": False,
         },
-        notes_heading="Canonical Notes",
+        notes_heading="Normalized Finding Notes",
         notes_lines=[
             f"- source raw findings: {', '.join(raw_ids) or 'none'}",
             "- required action: # TODO",
@@ -204,7 +211,7 @@ def build_normalization_skeleton(
     actor: str = "orchestrator-consensus-tool",
     merge_overlap: bool = False,
 ) -> str:
-    """Render `## NormalizationRecord` + `## CanonicalFinding` sections for one round.
+    """Render `## NormalizationRecord` + `## NormalizedFinding` sections for one round.
 
     Returns the full markdown body (including the level-1 heading) suitable for
     writing to `rounds/<round>/normalization.md`.
@@ -212,7 +219,7 @@ def build_normalization_skeleton(
     records = parse_run_records(run)
     normalized_round = normalize_round_id(round_id)
     findings = _raw_findings_for_round(records, normalized_round)
-    used_numbers = _existing_canonical_numbers(records, normalized_round)
+    used_numbers = _existing_normalized_numbers(records, normalized_round)
     buckets = _bucket_findings(findings, merge_overlap)
     created_at = utc_now()
     body = [f"# Normalization {normalized_round}", ""]
@@ -220,7 +227,7 @@ def build_normalization_skeleton(
         body.extend(["No RawFinding records exist for this round yet.", ""])
         return "\n".join(body)
     for bucket in buckets:
-        canonical_id = _next_canonical_id(normalized_round, used_numbers)
+        normalized_id = _next_normalized_id(normalized_round, used_numbers)
         body.append(
             _render_normalization_block(
                 run_id=run.name,
@@ -228,35 +235,46 @@ def build_normalization_skeleton(
                 created_at=created_at,
                 round_id=normalized_round,
                 bucket=bucket,
-                canonical_id=canonical_id,
+                normalized_id=normalized_id,
             )
         )
         body.append(
-            _render_canonical_block(
+            _render_normalized_finding_block(
                 run_id=run.name,
                 actor=actor,
                 created_at=created_at,
                 bucket=bucket,
-                canonical_id=canonical_id,
+                normalized_id=normalized_id,
             )
         )
     return "\n".join(body)
 
 
+@locked_run_command("findings_normalized")
 def cmd_normalize(args: argparse.Namespace) -> int:
     run = Path(args.run)
     try:
+        target = round_dir(run, args.round) / "normalization.md"
+        if target.exists() and args.overwrite:
+            target.unlink()
         body = build_normalization_skeleton(
             run,
             args.round,
             actor=args.actor,
             merge_overlap=args.merge_overlap,
         )
-        target = round_dir(run, args.round) / "normalization.md"
-        if target.exists() and (args.overwrite or _is_init_stub_normalization(target)):
+        if target.exists() and _is_init_stub_normalization(target):
             target.unlink()
-        atomic_write_new(target, body)
-        print(f"wrote normalization skeleton: {target}")
+        if target.exists():
+            if "## NormalizationRecord " not in body:
+                print(f"no unnormalized RawFinding records: {target}")
+                return 0
+            _, _, new_sections = body.partition("\n\n")
+            append_text(target, "\n" + new_sections)
+            print(f"appended normalization records: {target}")
+        else:
+            atomic_write_new(target, body)
+            print(f"wrote normalization skeleton: {target}")
         return 0
     except FileExistsError as exc:
         eprint(f"error: {exc}")

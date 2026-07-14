@@ -85,6 +85,26 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(finding_ids, [])
         self.assertEqual(sections, [])
 
+    def test_narrative_extraction_batch_qualifies_colliding_ids(self) -> None:
+        finding_ids, sections = derive_raw_findings_from_narrative(
+            raw_text="R1-CODEX-001 first.\n\nR1-CODEX-002 second.",
+            reviewer_identity="codex",
+            review_batch_id="review-batch-round-1-regression-v2",
+            artifact_version_id="v2",
+            run_id="sample",
+            created_at="2026-06-01T00:00:00Z",
+            existing_finding_ids={"r1-codex-001"},
+        )
+
+        self.assertEqual(
+            finding_ids,
+            [
+                "r1-codex-review-batch-round-1-regression-v2-001",
+                "r1-codex-review-batch-round-1-regression-v2-002",
+            ],
+        )
+        self.assertIn(f"raw_finding_id: {finding_ids[0]}", sections[0])
+
     def test_narrative_extraction_truncates_long_paragraph(self) -> None:
         """Paragraphs over the truncation limit get cut to keep the embedded context bounded."""
         long_paragraph = "R1-CODEX-01 details " + ("x" * 2000)

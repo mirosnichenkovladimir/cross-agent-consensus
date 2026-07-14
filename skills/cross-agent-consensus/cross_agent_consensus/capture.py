@@ -6,7 +6,16 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from cross_agent_consensus.io import append_text, atomic_write_new, eprint, sha256_file, slugify, utc_now, write_bytes_new
+from cross_agent_consensus.io import (
+    append_text,
+    atomic_write_new,
+    eprint,
+    read_json_file,
+    sha256_file,
+    slugify,
+    utc_now,
+    write_bytes_new,
+)
 from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
     detect_run_layout,
@@ -20,9 +29,70 @@ from cross_agent_consensus.markdown_records import frontmatter, parse_records_fr
 from cross_agent_consensus.models import CaptureCommandInput, FRESH_REVIEW_MODE, Record
 from cross_agent_consensus.prompts import active_review_batches, resolve_active_round, review_batch_by_id
 from cross_agent_consensus.records import NARRATIVE_FINDING_ID_RE, parse_run_records, records_by_type
+from cross_agent_consensus.run_audit import locked_run_command, recorded_run_version
+from cross_agent_consensus.invocation.session_paths import safe_actor_component
 
 
 _NARRATIVE_PARAGRAPH_LIMIT = 1200
+
+
+def capture_provenance(
+    run: Path,
+    args: CaptureCommandInput,
+) -> tuple[str, str | None, str | None, str | None, str | None]:
+    """Identify the exact supervised session behind a captured source file."""
+
+    source = Path(args.source_file).resolve() if args.source_file else None
+    if source is not None and args.actor:
+        actor_dir = round_dir(run, args.round) / "agents" / safe_actor_component(args.actor)
+        for session in sorted(actor_dir.glob("session-*"), reverse=True):
+            try:
+                invocation = read_json_file(session / "invocation.json")
+                exit_payload = read_json_file(session / "exit.json")
+            except (OSError, ValueError):
+                continue
+            raw_value = invocation.get("raw_output_path")
+            if not isinstance(raw_value, str) or not raw_value:
+                continue
+            invocation_raw = Path(raw_value)
+            if not invocation_raw.is_absolute():
+                invocation_raw = run / invocation_raw
+            if invocation_raw.resolve() != source:
+                continue
+            if exit_payload.get("final_state") != "completed":
+                continue
+            run_version = recorded_run_version(run)
+            requires_session_evidence = (
+                exit_payload.get("evidence_digest_version") == "session-evidence-1"
+                or exit_payload.get("raw_output_sha256") is not None
+                or (run_version is not None and run_version >= (0, 10, 0))
+            )
+            if requires_session_evidence:
+                if exit_payload.get("evidence_digest_version") != "session-evidence-1":
+                    raise ValueError(f"completed supervised session evidence marker drifted: {session.name}")
+                source_sha = sha256_file(source)
+                if exit_payload.get("raw_output_sha256") != source_sha:
+                    raise ValueError(
+                        f"captured source bytes do not match completed supervised session {session.name}"
+                    )
+                if not (session / "stdout.raw").is_file() or exit_payload.get("stdout_sha256") != sha256_file(
+                    session / "stdout.raw"
+                ):
+                    raise ValueError(f"completed supervised session stdout drifted: {session.name}")
+            prompt_sha = invocation.get("prompt_sha256")
+            return (
+                "live_cli",
+                str(invocation.get("session_id") or session.name),
+                str(session.relative_to(run)),
+                str(prompt_sha) if prompt_sha else None,
+                sha256_file(session / "exit.json"),
+            )
+    provider = (args.provider or "").lower().replace("-", "_")
+    if provider == "host_subagent":
+        return "host_subagent", None, None, None, None
+    if args.source_mode == "stdin":
+        return "stdin", None, None, None, None
+    return "manual_import", None, None, None, None
 
 
 def derive_raw_findings_from_narrative(
@@ -32,6 +102,7 @@ def derive_raw_findings_from_narrative(
     artifact_version_id: str,
     run_id: str,
     created_at: str,
+    existing_finding_ids: set[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Scan a reviewer narrative for `R<round>-<REVIEWER>-<NN>` ids and emit RawFinding skeletons.
 
@@ -51,22 +122,36 @@ def derive_raw_findings_from_narrative(
         if len(paragraph) > _NARRATIVE_PARAGRAPH_LIMIT:
             paragraph = paragraph[:_NARRATIVE_PARAGRAPH_LIMIT].rstrip() + "..."
         seen[finding_id] = paragraph
-    finding_ids: list[str] = list(seen.keys())
+    existing_finding_ids = existing_finding_ids or set()
+    qualify_batch = any(finding_id in existing_finding_ids for finding_id in seen)
+    emitted_ids: dict[str, str] = {}
+    for finding_id in seen:
+        emitted_id = finding_id
+        if qualify_batch:
+            id_match = NARRATIVE_FINDING_ID_RE.fullmatch(finding_id.upper())
+            if id_match is not None:
+                emitted_id = (
+                    f"r{id_match.group(1)}-{id_match.group(2).lower()}-"
+                    f"{slugify(review_batch_id)}-{int(id_match.group(3)):03d}"
+                )
+        emitted_ids[finding_id] = emitted_id
+    finding_ids: list[str] = list(emitted_ids.values())
     sections: list[str] = []
     for finding_id, paragraph in seen.items():
+        emitted_id = emitted_ids[finding_id]
         sections.append(
             "\n".join(
                 [
                     "",
-                    f"## RawFinding {finding_id}",
+                    f"## RawFinding {emitted_id}",
                     frontmatter(
                         {
                             "record_type": "RawFinding",
-                            "schema_version": "m2-markdown-1",
+                            "schema_version": "m2-markdown-2",
                             "run_id": run_id,
                             "actor_identity": "orchestrator-capture-tool",
                             "created_at": created_at,
-                            "raw_finding_id": finding_id,
+                            "raw_finding_id": emitted_id,
                             "reviewer_identity": reviewer_identity,
                             "artifact_version_id": artifact_version_id,
                             "review_batch_id": review_batch_id,
@@ -213,17 +298,28 @@ def append_reviewer_capture(
     rel_raw = raw_path.relative_to(run)
     raw_text = raw_path.read_text(encoding="utf-8", errors="replace")
     is_first_round_independent = round_id == "round-1" and batch.data.get("review_mode") == FRESH_REVIEW_MODE
+    capture_origin, session_id, session_path, prompt_sha, session_exit_sha = capture_provenance(run, args)
+    narrative_text = raw_text
+    if session_path is not None:
+        final_output = run / session_path / "final-output.md"
+        if final_output.is_file():
+            narrative_text = final_output.read_text(encoding="utf-8", errors="replace")
     derive_narrative = not getattr(args, "no_narrative_extract", False)
     raw_finding_ids: list[str] = []
     narrative_sections: list[str] = []
     if derive_narrative:
         raw_finding_ids, narrative_sections = derive_raw_findings_from_narrative(
-            raw_text=raw_text,
+            raw_text=narrative_text,
             reviewer_identity=reviewer_identity,
             review_batch_id=args.review_batch,
             artifact_version_id=args.artifact_version,
             run_id=run.name,
             created_at=created_at,
+            existing_finding_ids={
+                str(record.data.get("raw_finding_id"))
+                for record in records_by_type(records, "RawFinding")
+                if record.data.get("raw_finding_id")
+            },
         )
     head = "\n".join(
         [
@@ -233,7 +329,7 @@ def append_reviewer_capture(
             frontmatter(
                 {
                     "record_type": "RawReviewerOutput",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": "orchestrator-capture-tool",
                     "created_at": created_at,
@@ -243,6 +339,13 @@ def append_reviewer_capture(
                     "artifact_version_id": args.artifact_version,
                     "raw_finding_ids": raw_finding_ids,
                     "is_first_round_independent": is_first_round_independent,
+                    "raw_payload_path": str(rel_raw),
+                    "raw_payload_sha256": raw_sha,
+                    "capture_origin": capture_origin,
+                    "session_id_or_null": session_id,
+                    "session_path_or_null": session_path,
+                    "prompt_sha256_or_null": prompt_sha,
+                    "session_exit_sha256_or_null": session_exit_sha,
                 }
             ),
             "",
@@ -269,6 +372,7 @@ def append_validator_capture(run: Path, args: CaptureCommandInput, raw_path: Pat
     created_at = utc_now()
     evidence_id = f"validation-evidence-{slugify(args.validator_id)}-{slugify(raw_path.stem)}"
     rel_raw = raw_path.relative_to(run)
+    capture_origin, session_id, session_path, prompt_sha, session_exit_sha = capture_provenance(run, args)
     section = "\n".join(
         [
             "",
@@ -276,7 +380,7 @@ def append_validator_capture(run: Path, args: CaptureCommandInput, raw_path: Pat
             frontmatter(
                 {
                     "record_type": "ValidationEvidence",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": "orchestrator-capture-tool",
                     "created_at": created_at,
@@ -285,7 +389,13 @@ def append_validator_capture(run: Path, args: CaptureCommandInput, raw_path: Pat
                     "target_artifact_version_id": args.artifact_version,
                     "result": args.result,
                     "payload_reference": str(rel_raw),
+                    "payload_sha256": raw_sha,
                     "produced_by": args.actor or "validator",
+                    "capture_origin": capture_origin,
+                    "session_id_or_null": session_id,
+                    "session_path_or_null": session_path,
+                    "prompt_sha256_or_null": prompt_sha,
+                    "session_exit_sha256_or_null": session_exit_sha,
                     "waiver_authority_or_null": args.waiver_authority,
                     "waiver_rationale_or_null": args.waiver_rationale,
                 }
@@ -327,6 +437,7 @@ def _resolve_single_candidate(flag: str, candidates: list[str], *, hint: str) ->
     )
 
 
+@locked_run_command("evidence_captured")
 def cmd_capture(args: CaptureCommandInput) -> int:
     run = Path(args.run)
     try:

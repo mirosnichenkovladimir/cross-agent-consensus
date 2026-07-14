@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,7 @@ from cross_agent_consensus.invocation.selftest import (  # noqa: E402
     PROJECT_RULE_BEGIN,
     PROJECT_RULE_END,
     REQUIRED_DESCRIPTION_PHRASE,
+    _check_hermes_enabled,
     _selftest_exit_code,
     cmd_selftest,
 )
@@ -124,6 +126,32 @@ class SelftestTests(unittest.TestCase):
         rc, stdout, _err = self._capture(_Args(invocation=True, host="auto"))
         self.assertEqual(rc, 0, stdout)
         self.assertIn("not installed (skipped)", stdout)
+
+    @patch("cross_agent_consensus.invocation.selftest.shutil.which", return_value="/usr/bin/hermes")
+    @patch("cross_agent_consensus.invocation.selftest.subprocess.run")
+    def test_hermes_check_requests_wide_enabled_only_output(self, run, _which) -> None:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "│ cross-agent-consensus │ local │ enabled │\n"
+        run.return_value.stderr = ""
+
+        self.assertEqual(_check_hermes_enabled(self.home), [])
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], ["/usr/bin/hermes", "skills", "list", "--enabled-only"])
+        self.assertEqual(kwargs["env"]["COLUMNS"], "240")
+
+    @patch("cross_agent_consensus.invocation.selftest.shutil.which", return_value="/usr/bin/hermes")
+    @patch("cross_agent_consensus.invocation.selftest.subprocess.run")
+    def test_hermes_check_reports_skill_missing_from_enabled_list(self, run, _which) -> None:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "│ another-skill │ local │ enabled │\n"
+        run.return_value.stderr = ""
+
+        messages = _check_hermes_enabled(self.home)
+
+        self.assertEqual(
+            messages,
+            ["cross-agent-consensus is not listed as enabled by Hermes; run `hermes skills config`"],
+        )
 
     def test_write_suggested_rule_on_empty_file_is_idempotent(self) -> None:
         target = self.home / "project.rules.md"

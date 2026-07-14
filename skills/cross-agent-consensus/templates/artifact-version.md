@@ -1,6 +1,6 @@
 ---
 record_type: ArtifactVersion
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <actor_identity>
 created_at: <ISO-8601>

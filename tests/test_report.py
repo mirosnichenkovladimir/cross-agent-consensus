@@ -22,25 +22,25 @@ from cross_agent_consensus.report import (
 )
 
 
-def _write_run_with_canonical(tmp_root: Path, canonical_specs: list[dict]) -> Path:
-    """Create a minimal run containing one ArtifactVersion and N CanonicalFindings."""
+def _write_run_with_normalized(tmp_root: Path, normalized_specs: list[dict]) -> Path:
+    """Create a minimal run containing one ArtifactVersion and N NormalizedFindings."""
     run = tmp_root / "sample"
     run.mkdir()
     sections: list[str] = ["# Run sample", ""]
-    for spec in canonical_specs:
-        sections.append(f"## CanonicalFinding {spec['canonical_finding_id']}")
+    for spec in normalized_specs:
+        sections.append(f"## NormalizedFinding {spec['normalized_finding_id']}")
         sections.append(
             frontmatter(
                 {
-                    "record_type": "CanonicalFinding",
-                    "schema_version": "m2-markdown-1",
+                    "record_type": "NormalizedFinding",
+                    "schema_version": "m2-markdown-2",
                     "run_id": "sample",
                     "actor_identity": "orchestrator",
                     "created_at": "2026-06-01T00:00:00Z",
-                    "canonical_finding_id": spec["canonical_finding_id"],
+                    "normalized_finding_id": spec["normalized_finding_id"],
                     "target_artifact_version_id": "v1",
                     "source_raw_finding_ids": ["rf-001"],
-                    "normalization_record_id": f"normalization-{spec['canonical_finding_id']}",
+                    "normalization_record_id": f"normalization-{spec['normalized_finding_id']}",
                     "materiality": "material",
                     "materiality_status": "undisputed",
                     "scope_classification": spec.get("scope_classification", "in_scope"),
@@ -66,7 +66,7 @@ def _append_config_resolution(run: Path, *, feedback_enabled: bool) -> None:
             frontmatter(
                 {
                     "record_type": "ConfigResolution",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": "orchestrator",
                     "created_at": "2026-06-01T00:00:00Z",
@@ -86,23 +86,51 @@ def _append_config_resolution(run: Path, *, feedback_enabled: bool) -> None:
         handle.write(block)
 
 
+def _append_rereview_decision(run: Path, *, finding_id: str, decision: str) -> None:
+    block = "\n".join(
+        [
+            "",
+            "## ReReviewDecision rereview-sample",
+            frontmatter(
+                {
+                    "record_type": "ReReviewDecision",
+                    "schema_version": "m2-markdown-2",
+                    "run_id": run.name,
+                    "actor_identity": "reviewer-codex",
+                    "created_at": "2026-06-01T00:00:00Z",
+                    "re_review_decision_id": "rereview-sample",
+                    "normalized_finding_id": finding_id,
+                    "reviewer_identity": "reviewer-codex",
+                    "decision": decision,
+                    "rationale": "The revised artifact removes the defect.",
+                    "artifact_version_id_or_null": "v2",
+                    "review_batch_id": "review-batch-002",
+                }
+            ),
+            "",
+        ]
+    )
+    with (run / "run.md").open("a", encoding="utf-8") as handle:
+        handle.write(block)
+
+
 class ReportTests(unittest.TestCase):
     def test_in_scope_blocking_finding_renders_blocker_section(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
                 [
                     {
-                        "canonical_finding_id": "cf-001",
+                        "normalized_finding_id": "nf-001",
                         "claim": "Bug here",
                         "rationale_or_summary": "Detailed reasoning",
                     },
                     {
-                        "canonical_finding_id": "cf-002",
+                        "normalized_finding_id": "nf-002",
                         "scope_classification": "out_of_scope",
                     },
                     {
-                        "canonical_finding_id": "cf-003",
+                        "normalized_finding_id": "nf-003",
                         "blocking_status": "non_blocking",
                     },
                 ],
@@ -111,16 +139,16 @@ class ReportTests(unittest.TestCase):
             body = build_report_skeleton(run, "consensus_reached", "v2")
 
         # Only the in-scope blocking finding becomes a blocker section.
-        self.assertIn("### Blocker 1 — cf-001", body)
+        self.assertIn("### Blocker 1 — nf-001", body)
         self.assertNotIn("### Blocker 2", body)
         self.assertIn("Bug here", body)
         self.assertIn("Detailed reasoning", body)
 
     def test_escalated_to_human_emits_escalation_record_frontmatter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
 
             body = build_report_skeleton(run, "escalated_to_human", None)
@@ -130,18 +158,31 @@ class ReportTests(unittest.TestCase):
 
         escalations = records_by_type(records, "EscalationRecord")
         self.assertEqual(len(escalations), 1)
-        self.assertEqual(escalations[0].data["affected_finding_ids"], ["cf-001"])
+        self.assertEqual(escalations[0].data["affected_finding_ids"], ["nf-001"])
         termination = records_by_type(records, "TerminationRecord")
         self.assertEqual(len(termination), 1)
         self.assertEqual(termination[0].data["terminal_condition"], "escalated_to_human")
-        self.assertIn("cf-001", termination[0].data["unresolved_finding_ids"])
+        self.assertIn("nf-001", termination[0].data["unresolved_finding_ids"])
         self.assertIn("escalation-report-001", termination[0].data["supporting_record_ids"])
+
+    def test_verified_rereview_removes_blocker_from_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _write_run_with_normalized(
+                Path(tmp_name),
+                [{"normalized_finding_id": "nf-001"}],
+            )
+            _append_rereview_decision(run, finding_id="nf-001", decision="verified")
+
+            body = build_report_skeleton(run, "consensus_reached", "v2")
+
+        self.assertNotIn("### Blocker 1", body)
+        self.assertIn("unresolved NormalizedFinding ids: `[]`", body)
 
     def test_consensus_reached_omits_escalation_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
 
             body = build_report_skeleton(run, "consensus_reached", "v2")
@@ -149,11 +190,11 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("## EscalationRecord ", body)
         self.assertIn("final_artifact_version_id_or_null: v2", body)
 
-    def test_final_report_uses_canonical_field_name(self) -> None:
+    def test_final_report_uses_normalized_field_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
 
             body = build_report_skeleton(run, "consensus_reached", "v3")
@@ -176,9 +217,9 @@ class ReportTests(unittest.TestCase):
 
     def test_cmd_report_writes_feedback_when_config_resolution_enables_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
             _append_config_resolution(run, feedback_enabled=True)
             args = argparse.Namespace(
@@ -198,9 +239,9 @@ class ReportTests(unittest.TestCase):
 
     def test_cmd_report_omits_feedback_when_config_resolution_disables_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
             _append_config_resolution(run, feedback_enabled=False)
             args = argparse.Namespace(
@@ -216,9 +257,9 @@ class ReportTests(unittest.TestCase):
 
     def test_cmd_report_preserves_existing_feedback_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
             _append_config_resolution(run, feedback_enabled=True)
             existing = run / FEEDBACK_FILENAME
@@ -239,9 +280,9 @@ class ReportTests(unittest.TestCase):
 
     def test_cmd_report_writes_file_and_overwrite_replaces_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
-            run = _write_run_with_canonical(
+            run = _write_run_with_normalized(
                 Path(tmp_name),
-                [{"canonical_finding_id": "cf-001"}],
+                [{"normalized_finding_id": "nf-001"}],
             )
             args = argparse.Namespace(
                 run=str(run),

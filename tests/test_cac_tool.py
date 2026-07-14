@@ -59,7 +59,7 @@ class ConsensusToolTests(unittest.TestCase):
             *extra,
         )
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        runs = list((tmp / "runs").iterdir())
+        runs = [path for path in (tmp / "runs").iterdir() if path.is_dir()]
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0].name, "smoke-cac-scripts-consensus-001")
         return runs[0]
@@ -86,7 +86,7 @@ class ConsensusToolTests(unittest.TestCase):
                     f"## ReviewBatch review-batch-round-{round_number}-{mode}",
                     "---",
                     "record_type: ReviewBatch",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: orchestrator-codex",
                     'created_at: "2026-05-29T00:00:00Z"',
@@ -114,7 +114,7 @@ class ConsensusToolTests(unittest.TestCase):
                     f"## RawFinding raw-{finding_id}",
                     "---",
                     "record_type: RawFinding",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: reviewer-codex",
                     'created_at: "2026-06-02T00:00:00Z"',
@@ -144,7 +144,7 @@ class ConsensusToolTests(unittest.TestCase):
                     f"## NormalizationRecord normalization-{finding_id}",
                     "---",
                     "record_type: NormalizationRecord",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: orchestrator-codex",
                     'created_at: "2026-06-02T00:00:00Z"',
@@ -156,17 +156,17 @@ class ConsensusToolTests(unittest.TestCase):
                     "scope_classification: in_scope",
                     "blocking_status: blocking",
                     "rationale: normalized",
-                    f"canonical_finding_id: {finding_id}",
+                    f"normalized_finding_id: {finding_id}",
                     "---",
                     "",
-                    f"## CanonicalFinding {finding_id}",
+                    f"## NormalizedFinding {finding_id}",
                     "---",
-                    "record_type: CanonicalFinding",
-                    "schema_version: m2-markdown-1",
+                    "record_type: NormalizedFinding",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: orchestrator-codex",
                     'created_at: "2026-06-02T00:00:00Z"',
-                    f"canonical_finding_id: {finding_id}",
+                    f"normalized_finding_id: {finding_id}",
                     "target_artifact_version_id: v1",
                     f"source_raw_finding_ids: [raw-{finding_id}]",
                     f"normalization_record_id: normalization-{finding_id}",
@@ -185,7 +185,7 @@ class ConsensusToolTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def write_raw_and_canonical_finding(self, run: Path, tmp: Path) -> None:
+    def write_raw_and_normalized_finding(self, run: Path, tmp: Path) -> None:
         raw = tmp / "reviewer.out"
         raw.write_text("raw-finding-001: missing terminal condition\n", encoding="utf-8")
         result = self.run_cli(
@@ -214,7 +214,7 @@ class ConsensusToolTests(unittest.TestCase):
                     "## RawFinding raw-finding-001",
                     "---",
                     "record_type: RawFinding",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: reviewer-codex",
                     'created_at: "2026-05-29T00:00:00Z"',
@@ -243,7 +243,7 @@ class ConsensusToolTests(unittest.TestCase):
                     "## NormalizationRecord normalization-001",
                     "---",
                     "record_type: NormalizationRecord",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: orchestrator-codex",
                     'created_at: "2026-05-29T00:00:00Z"',
@@ -256,17 +256,17 @@ class ConsensusToolTests(unittest.TestCase):
                     "scope_classification: in_scope",
                     "blocking_status: blocking",
                     "rationale: The claim affects consensus termination.",
-                    "canonical_finding_id: canonical-finding-001",
+                    "normalized_finding_id: normalized-finding-001",
                     "---",
                     "",
-                    "## CanonicalFinding canonical-finding-001",
+                    "## NormalizedFinding normalized-finding-001",
                     "---",
-                    "record_type: CanonicalFinding",
-                    "schema_version: m2-markdown-1",
+                    "record_type: NormalizedFinding",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: orchestrator-codex",
                     'created_at: "2026-05-29T00:00:00Z"',
-                    "canonical_finding_id: canonical-finding-001",
+                    "normalized_finding_id: normalized-finding-001",
                     "target_artifact_version_id: v1",
                     "source_raw_finding_ids:",
                     "  - raw-finding-001",
@@ -296,12 +296,12 @@ class ConsensusToolTests(unittest.TestCase):
                     f"## ReReviewDecision rereview-{index}",
                     "---",
                     "record_type: ReReviewDecision",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: orchestrator-codex",
                     'created_at: "2026-06-02T00:00:00Z"',
                     f"re_review_decision_id: rereview-{index}",
-                    f"canonical_finding_id: {finding_id}",
+                    f"normalized_finding_id: {finding_id}",
                     "reviewer_identity: reviewer-codex",
                     "decision: still_valid",
                     "rationale: still not fixed",
@@ -602,7 +602,7 @@ class ConsensusToolTests(unittest.TestCase):
                     "## ReviewBatch duplicate-from-payload",
                     "---",
                     "record_type: ReviewBatch",
-                    "schema_version: m2-markdown-1",
+                    "schema_version: m2-markdown-2",
                     f"run_id: {run.name}",
                     "actor_identity: payload",
                     'created_at: "2026-05-29T00:00:00Z"',
@@ -827,7 +827,7 @@ class ConsensusToolTests(unittest.TestCase):
                         "## RawReviewerOutput raw-output-round-1-misplaced",
                         "---",
                         "record_type: RawReviewerOutput",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         f"run_id: {run.name}",
                         "actor_identity: orchestrator-capture-tool",
                         'created_at: "2026-05-29T00:00:00Z"',
@@ -873,6 +873,77 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertIn("reached max_remediation_rounds_per_finding=2", result.stderr)
             self.assertIn("EscalationRecord", (run / "escalations.md").read_text(encoding="utf-8"))
             self.assertFalse((run / "rounds" / "round-002" / "rereviews" / "reviewer-codex.md").exists())
+
+    def test_rereview_skeleton_qualifies_paths_and_ids_by_review_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = self.init_run(Path(tmp_name))
+            self.write_blocking_finding(run)
+
+            first = self.run_cli(
+                "rereview-skeleton",
+                "--run",
+                str(run),
+                "--round",
+                "round-1",
+                "--review-batch",
+                "review-batch-round-1-fresh_review",
+                "--reviewer",
+                "reviewer-codex",
+                "--artifact-version",
+                "v1",
+            )
+            self.assertEqual(first.returncode, 0, first.stderr + first.stdout)
+            first_path = (
+                run
+                / "rounds"
+                / "round-001"
+                / "rereviews"
+                / "review-batch-round-1-fresh-review"
+                / "reviewer-codex.md"
+            )
+            first_path.write_text(
+                first_path.read_text(encoding="utf-8")
+                .replace("<verified|rejection_accepted|still_valid|disputed|needs_human>", "verified")
+                .replace("<required>", "fixed in v1"),
+                encoding="utf-8",
+            )
+
+            batch = self.run_cli(
+                "conclusion-validation",
+                "--run",
+                str(run),
+                "--round",
+                "round-1",
+                "--artifact-version",
+                "v1",
+                "--finding-id",
+                "CXR-001",
+                "--review-batch-id",
+                "second-rereview",
+            )
+            self.assertEqual(batch.returncode, 0, batch.stderr + batch.stdout)
+            second = self.run_cli(
+                "rereview-skeleton",
+                "--run",
+                str(run),
+                "--round",
+                "round-1",
+                "--review-batch",
+                "second-rereview",
+                "--reviewer",
+                "reviewer-codex",
+                "--artifact-version",
+                "v1",
+            )
+
+            second_path = run / "rounds" / "round-001" / "rereviews" / "second-rereview" / "reviewer-codex.md"
+            self.assertEqual(second.returncode, 0, second.stderr + second.stdout)
+            self.assertTrue(first_path.is_file())
+            self.assertTrue(second_path.is_file())
+            self.assertIn(
+                "re_review_decision_id: re-review-round-1-second-rereview-reviewer-codex-001",
+                second_path.read_text(encoding="utf-8"),
+            )
 
     def test_rereview_prompt_stops_at_remediation_cap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -1409,11 +1480,12 @@ class ConsensusToolTests(unittest.TestCase):
             result = self.run_cli("validate", "--run", str(run), "--reviewer-isolation")
             self.assertEqual(result.returncode, 2)
             self.assertIn("CLI reviewer 'codex' has RawReviewerOutput", result.stdout)
-            self.assertIn("without a completed invoke-agent session", result.stdout)
+            self.assertIn("without exact live_cli evidence", result.stdout)
 
             self.write_completed_reviewer_session(run, "codex")
             result = self.run_cli("validate", "--run", str(run), "--reviewer-isolation")
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("without exact live_cli evidence", result.stdout)
 
     def test_capture_allocates_unique_raw_payload_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -1450,7 +1522,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp)
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             result = self.run_cli(
                 "conclusion-validation",
@@ -1488,12 +1560,12 @@ class ConsensusToolTests(unittest.TestCase):
             raw.write_text(
                 "\n".join(
                     [
-                        "canonical_finding_id: canonical-finding-001",
+                        "normalized_finding_id: normalized-finding-001",
                         "reviewer_decision: agree",
                         "corrected_conclusion: null",
                         "needs_human_reason: null",
-                        "rationale: The canonical evidence supports a valid blocker conclusion.",
-                        "evidence_refs: [canonical.rationale_or_summary, raw-finding-001]",
+                        "rationale: The normalized evidence supports a valid blocker conclusion.",
+                        "evidence_refs: [normalized.rationale_or_summary, raw-finding-001]",
                     ]
                 ),
                 encoding="utf-8",
@@ -1542,7 +1614,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp)
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             result = self.run_cli("conclusion-validation", "--run", str(run), "--round", "round-1")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -1574,7 +1646,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp)
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             result = self.run_cli("conclusion-validation", "--run", str(run), "--round", "round-1")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -1590,10 +1662,10 @@ class ConsensusToolTests(unittest.TestCase):
             raw.write_text(
                 "\n".join(
                     [
-                        "canonical_finding_id: canonical-finding-001",
+                        "normalized_finding_id: normalized-finding-001",
                         "reviewer_decision: agree",
-                        "rationale: The canonical evidence supports the proposed conclusion.",
-                        "evidence_refs: [canonical.rationale_or_summary]",
+                        "rationale: The normalized evidence supports the proposed conclusion.",
+                        "evidence_refs: [normalized.rationale_or_summary]",
                     ]
                 ),
                 encoding="utf-8",
@@ -1626,12 +1698,12 @@ class ConsensusToolTests(unittest.TestCase):
                         "## AuthorResponse author-response-round-1-001",
                         "---",
                         "record_type: AuthorResponse",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         f"run_id: {run.name}",
                         "actor_identity: author-codex",
                         'created_at: "2026-05-29T00:00:00Z"',
                         "author_response_id: author-response-round-1-001",
-                        "canonical_finding_id: canonical-finding-001",
+                        "normalized_finding_id: normalized-finding-001",
                         "response_type: accept",
                         "rationale: Will fix.",
                         "resulting_artifact_version_id_or_null: null",
@@ -1650,7 +1722,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp, "--reviewer", "reviewer-claude")
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             result = self.run_cli("conclusion-validation", "--run", str(run), "--round", "round-1", "--write-prompts")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -1670,10 +1742,10 @@ class ConsensusToolTests(unittest.TestCase):
             raw.write_text(
                 "\n".join(
                     [
-                        "canonical_finding_id: canonical-finding-001",
+                        "normalized_finding_id: normalized-finding-001",
                         "reviewer_decision: agree",
-                        "rationale: The canonical evidence supports the proposed conclusion.",
-                        "evidence_refs: [canonical.rationale_or_summary]",
+                        "rationale: The normalized evidence supports the proposed conclusion.",
+                        "evidence_refs: [normalized.rationale_or_summary]",
                     ]
                 ),
                 encoding="utf-8",
@@ -1723,7 +1795,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp)
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             result = self.run_cli("conclusion-validation", "--run", str(run), "--round", "round-1")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -1754,12 +1826,12 @@ class ConsensusToolTests(unittest.TestCase):
                         "## AuthorResponse author-response-round-1-001",
                         "---",
                         "record_type: AuthorResponse",
-                        "schema_version: m2-markdown-1",
+                        "schema_version: m2-markdown-2",
                         f"run_id: {run.name}",
                         "actor_identity: author-codex",
                         'created_at: "2026-05-29T00:00:00Z"',
                         "author_response_id: author-response-round-1-001",
-                        "canonical_finding_id: canonical-finding-001",
+                        "normalized_finding_id: normalized-finding-001",
                         "response_type: accept",
                         "rationale: Policy skipped conclusion validation.",
                         "resulting_artifact_version_id_or_null: null",
@@ -1777,7 +1849,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp, "--profile", "implementation-test", "--validator", "smoke_validator")
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             result = self.run_cli("conclusion-validation", "--run", str(run), "--round", "round-1")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -1809,7 +1881,7 @@ class ConsensusToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = self.init_run(tmp)
-            self.write_raw_and_canonical_finding(run, tmp)
+            self.write_raw_and_normalized_finding(run, tmp)
 
             raw = tmp / "duplicate-reviewer.out"
             raw.write_text("duplicate raw output\n", encoding="utf-8")
@@ -2606,6 +2678,17 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
             result = self.run_cli(
+                "report",
+                "--run",
+                str(run),
+                "--terminal-condition",
+                "consensus_reached",
+                "--final-artifact-version",
+                "v1",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+            result = self.run_cli(
                 "terminate",
                 "--run",
                 str(run),
@@ -2618,6 +2701,10 @@ class ConsensusToolTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertTrue((run / "report.md").is_file())
+            self.assertIn(
+                "All required validators passed and no unresolved blocking findings were recorded.",
+                (run / "report.md").read_text(encoding="utf-8"),
+            )
             result = self.run_cli("validate", "--run", str(run), "--terminal")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 

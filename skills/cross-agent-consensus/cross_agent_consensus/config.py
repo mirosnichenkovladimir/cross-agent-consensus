@@ -666,7 +666,7 @@ def config_resolution_record(args: argparse.Namespace, run_id: str, created_at: 
         return ""
     data = {
         "record_type": "ConfigResolution",
-        "schema_version": "m2-markdown-1",
+        "schema_version": "m2-markdown-2",
         "run_id": run_id,
         "actor_identity": args.orchestrator,
         "created_at": created_at,

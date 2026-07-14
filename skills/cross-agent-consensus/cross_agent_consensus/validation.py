@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from cross_agent_consensus.io import read_json_file, slugify
+from cross_agent_consensus.integrity import artifact_integrity_messages, integrity_messages, live_session_messages
 from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
     REPORT_FILENAME,
@@ -29,17 +30,21 @@ from cross_agent_consensus.record_schema import (
     REQUIRED_FIELDS,
     REQUIRED_FIELD_TYPES,
     expected_type_label,
+    OPTIONAL_FIELD_TYPES,
+    optional_type_label,
 )
 from cross_agent_consensus.records import (
     RunSnapshot,
-    canonical_finding_ids,
+    normalized_finding_ids,
     first_record,
     parse_run_records,
     parse_run_snapshot,
     records_by_type,
 )
-from cross_agent_consensus.invocation.session_paths import safe_actor_component
+from cross_agent_consensus.record_compatibility import SUPPORTED_RECORD_SCHEMA_VERSIONS
 from cross_agent_consensus.link_validation import collect_link_messages
+from cross_agent_consensus.run_audit import recorded_run_version, run_event_messages
+from cross_agent_consensus.invocation.session_paths import safe_actor_component
 
 RESOLVING_REREVIEW_DECISIONS = {"verified", "rejection_accepted"}
 UNRESOLVED_REREVIEW_DECISIONS = {"still_valid", "disputed", "needs_human"}
@@ -82,11 +87,12 @@ def check_pre_execution(run: Path, snapshot: RunSnapshot | None = None) -> Check
             for field in COMMON_FIELDS + REQUIRED_FIELDS.get(record.record_type, []):
                 if required_field_missing(record.data, field):
                     messages.append(f"{record.path}:{record.heading_line}: {record.record_type} missing field {field}")
+    messages.extend(artifact_integrity_messages(run, records))
     return CheckResult(not messages, messages or ["pre-execution checks passed"])
 
 
 def conclusion_validation_batches(records: list[Record]) -> list[Record]:
-    canonical_ids = canonical_finding_ids(records)
+    normalized_ids = normalized_finding_ids(records)
     batches: list[Record] = []
     for record in records_by_type(records, "ReviewBatch"):
         source_ids = [str(value) for value in record.data.get("source_finding_ids") or []]
@@ -94,13 +100,13 @@ def conclusion_validation_batches(records: list[Record]) -> list[Record]:
             record.data.get("review_mode") == CONCLUSION_VALIDATION_REVIEW_MODE
             and record.data.get("batch_purpose") == CONCLUSION_VALIDATION_BATCH_PURPOSE
             and source_ids
-            and all(source_id in canonical_ids for source_id in source_ids)
+            and all(source_id in normalized_ids for source_id in source_ids)
         ):
             batches.append(record)
     return batches
 
 
-def expected_conclusion_validation_reviewers(records: list[Record], batch: Record) -> set[str]:
+def expected_reviewers_for_batch(records: list[Record], batch: Record) -> set[str]:
     expected = batch.data.get("expected_reviewer_identities")
     if isinstance(expected, list):
         return {str(value) for value in expected if value}
@@ -133,7 +139,7 @@ def conclusion_validation_reviewers_by_batch(records: list[Record]) -> dict[str,
 def conclusion_validation_batch_complete(records: list[Record], batch: Record) -> bool:
     batch_id = str(batch.data.get("review_batch_id"))
     captured = conclusion_validation_reviewers_by_batch(records).get(batch_id, set())
-    expected = expected_conclusion_validation_reviewers(records, batch)
+    expected = expected_reviewers_for_batch(records, batch)
     return expected <= captured if expected else bool(captured)
 
 
@@ -159,7 +165,7 @@ def conclusion_validation_ordering_messages(records: list[Record]) -> list[str]:
             raw_outputs_by_batch.setdefault(str(batch_id), []).append(record)
     responses_by_finding: dict[str, list[Record]] = {}
     for record in records_by_type(records, "AuthorResponse"):
-        finding_id = record.data.get("canonical_finding_id")
+        finding_id = record.data.get("normalized_finding_id")
         if finding_id:
             responses_by_finding.setdefault(str(finding_id), []).append(record)
 
@@ -172,7 +178,7 @@ def conclusion_validation_ordering_messages(records: list[Record]) -> list[str]:
         if not responses:
             continue
         raw_outputs = raw_outputs_by_batch.get(batch_id, [])
-        expected = expected_conclusion_validation_reviewers(records, batch)
+        expected = expected_reviewers_for_batch(records, batch)
         captured = {str(record.data.get("reviewer_identity")) for record in raw_outputs}
         missing_reviewers = sorted(expected - captured) if expected else []
         if not raw_outputs or missing_reviewers:
@@ -180,7 +186,7 @@ def conclusion_validation_ordering_messages(records: list[Record]) -> list[str]:
             for response in responses:
                 messages.append(
                     f"{response.path}:{response.heading_line}: AuthorResponse for "
-                    f"{response.data.get('canonical_finding_id')} exists before conclusion-validation output "
+                    f"{response.data.get('normalized_finding_id')} exists before conclusion-validation output "
                     f"for ReviewBatch {batch_id}{missing_text}"
                 )
             continue
@@ -212,73 +218,72 @@ def cli_mapped_reviewer_identities(records: list[Record]) -> set[str]:
     return reviewers
 
 
-def completed_reviewer_agent_session_exists(run: Path, round_id: str, reviewer_identity: str) -> bool:
-    try:
-        round_number = record_round_number_value(round_id)
-    except ValueError:
+def legacy_completed_reviewer_session_exists(run: Path, round_id: str, reviewer_identity: str) -> bool:
+    """Compatibility check for runs recorded before exact live-session evidence."""
+    match = re.fullmatch(r"round-(\d+)", round_id)
+    if match is None:
         return False
-    canonical_round_id = f"round-{round_number:03d}"
+    canonical_round_id = f"round-{int(match.group(1)):03d}"
     actor_dir = run / "rounds" / canonical_round_id / "agents" / safe_actor_component(reviewer_identity)
-    if not actor_dir.is_dir():
-        return False
-    expected_rounds = {round_id, canonical_round_id}
     for session in sorted(actor_dir.glob("session-*")):
-        if not session.is_dir():
-            continue
         try:
             invocation = read_json_file(session / "invocation.json")
             state = read_json_file(session / "state.json")
             exit_payload = read_json_file(session / "exit.json")
         except (OSError, ValueError):
             continue
-        if invocation.get("actor_identity") != reviewer_identity:
-            continue
-        if invocation.get("phase") != "reviewer":
-            continue
-        if invocation.get("round_id") not in expected_rounds:
-            continue
-        if state.get("state") != "completed":
-            continue
-        if exit_payload.get("final_state") != "completed":
-            continue
-        if exit_payload.get("exit_code_or_null") != 0:
-            continue
-        return True
+        if (
+            invocation.get("actor_identity") == reviewer_identity
+            and invocation.get("phase") == "reviewer"
+            and state.get("state") == "completed"
+            and exit_payload.get("final_state") == "completed"
+            and exit_payload.get("exit_code_or_null") == 0
+        ):
+            return True
     return False
-
-
-def record_round_number_value(round_id: str) -> int:
-    match = re.fullmatch(r"round-(\d+)", str(round_id))
-    if not match:
-        raise ValueError(f"invalid round id: {round_id}")
-    return int(match.group(1))
 
 
 def reviewer_cli_invocation_messages(run: Path, records: list[Record]) -> list[str]:
     cli_reviewers = cli_mapped_reviewer_identities(records)
     if not cli_reviewers:
         return []
-    batch_rounds: dict[str, str] = {}
-    for batch in records_by_type(records, "ReviewBatch"):
-        batch_id = batch.data.get("review_batch_id")
-        round_id = batch.data.get("round_id")
-        if batch_id and round_id:
-            batch_rounds[str(batch_id)] = str(round_id)
     messages: list[str] = []
+    exact_evidence_required = (recorded_run_version(run) or (0, 0, 0)) >= (0, 10, 0)
+    batch_rounds = {
+        str(batch.data.get("review_batch_id")): str(batch.data.get("round_id"))
+        for batch in records_by_type(records, "ReviewBatch")
+        if batch.data.get("review_batch_id") and batch.data.get("round_id")
+    }
     for record in records_by_type(records, "RawReviewerOutput"):
         reviewer = str(record.data.get("reviewer_identity") or "")
         if reviewer not in cli_reviewers:
             continue
         batch_id = str(record.data.get("review_batch_id") or "")
-        round_id = batch_rounds.get(batch_id)
-        if round_id is None:
+        if not exact_evidence_required:
+            round_id = batch_rounds.get(batch_id, "")
+            if legacy_completed_reviewer_session_exists(run, round_id, reviewer):
+                continue
+            messages.append(
+                f"{record.path}:{record.heading_line}: CLI reviewer {reviewer!r} has RawReviewerOutput for "
+                f"ReviewBatch {batch_id} without a completed invoke-agent session; use consensus invoke-agent"
+            )
             continue
-        if completed_reviewer_agent_session_exists(run, round_id, reviewer):
+        if record.data.get("capture_origin") != "live_cli":
+            messages.append(
+                f"{record.path}:{record.heading_line}: CLI reviewer {reviewer!r} has RawReviewerOutput for "
+                f"ReviewBatch {batch_id} without exact live_cli evidence; use consensus invoke-agent "
+                "instead of direct capture, host subagents, or in-chat review for configured CLI reviewers"
+            )
             continue
-        messages.append(
-            f"{record.path}:{record.heading_line}: CLI reviewer {reviewer!r} has RawReviewerOutput for "
-            f"ReviewBatch {batch_id} without a completed invoke-agent session; use consensus invoke-agent "
-            "instead of direct capture, host subagents, or in-chat review for configured CLI reviewers"
+        messages.extend(
+            live_session_messages(
+                run,
+                records,
+                record,
+                actor_identity=reviewer,
+                phase="reviewer",
+                artifact_version_id=str(record.data.get("artifact_version_id") or ""),
+            )
         )
     return messages
 
@@ -308,8 +313,11 @@ def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult
         for field in COMMON_FIELDS:
             if required_field_missing(record.data, field):
                 messages.append(f"{record.path}:{record.heading_line}: missing common field {field}")
-        if record.data.get("schema_version") != "m2-markdown-1":
-            messages.append(f"{record.path}:{record.heading_line}: schema_version must be m2-markdown-1")
+        if record.data.get("schema_version") not in SUPPORTED_RECORD_SCHEMA_VERSIONS:
+            messages.append(
+                f"{record.path}:{record.heading_line}: schema_version must be one of "
+                f"{sorted(SUPPORTED_RECORD_SCHEMA_VERSIONS)}"
+            )
         for field in REQUIRED_FIELDS.get(record.record_type, []):
             if required_field_missing(record.data, field):
                 messages.append(f"{record.path}:{record.heading_line}: {record.record_type} missing field {field}")
@@ -323,6 +331,15 @@ def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult
                         f"{record.path}:{record.heading_line}: {record.record_type}.{field} must be "
                         f"{expected_type_label(field)}, got {type(value).__name__}"
                     )
+        for field, expected_types in OPTIONAL_FIELD_TYPES.items():
+            if field not in record.data:
+                continue
+            value = record.data[field]
+            if not isinstance(value, expected_types):
+                messages.append(
+                    f"{record.path}:{record.heading_line}: {record.record_type}.{field} must be "
+                    f"{optional_type_label(field)}, got {type(value).__name__}"
+                )
         unique = f"{record.record_type}:{record.record_id}"
         if unique in seen_ids:
             messages.append(f"{record.path}:{record.heading_line}: duplicate record id {unique}")
@@ -340,6 +357,17 @@ def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult
     messages.extend(conclusion_validation_ordering_messages(records))
     ok = not messages
     return CheckResult(ok, (warnings + messages) or ["record checks passed"])
+
+
+def check_integrity(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
+    records = (snapshot or parse_run_snapshot(run)).records
+    messages = integrity_messages(run, records)
+    return CheckResult(not messages, messages or ["content integrity checks passed"])
+
+
+def check_run_events(run: Path) -> CheckResult:
+    messages = run_event_messages(run)
+    return CheckResult(not messages, messages or ["run event checks passed"])
 
 
 def check_participants(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult:
@@ -450,11 +478,89 @@ def latest_validator_evidence(records: list[Record]) -> dict[str, Record]:
     return latest
 
 
+def _rereview_decisions_by_batch(records: list[Record]) -> dict[tuple[str, str, str], str]:
+    """Return the latest decision for each finding, batch, and reviewer."""
+
+    latest: dict[tuple[str, str, str], str] = {}
+    for record in records_by_type(records, "ReReviewDecision"):
+        finding_id = record.data.get("normalized_finding_id")
+        batch_id = record.data.get("review_batch_id") or "__legacy_rereview_batch__"
+        reviewer_identity = record.data.get("reviewer_identity")
+        decision = record.data.get("decision")
+        if finding_id and reviewer_identity and decision:
+            latest[(str(finding_id), str(batch_id), str(reviewer_identity))] = str(decision)
+    return latest
+
+
+def _latest_rereview_batch_decisions(
+    records: list[Record],
+) -> dict[str, tuple[str, set[str], dict[str, str]]]:
+    decisions = _rereview_decisions_by_batch(records)
+    batch_records = {
+        str(record.data.get("review_batch_id")): record
+        for record in records_by_type(records, "ReviewBatch")
+        if record.data.get("review_batch_id")
+    }
+    batch_order = {batch_id: index for index, batch_id in enumerate(batch_records)}
+    fallback_order: dict[str, int] = {}
+    for record in records_by_type(records, "ReReviewDecision"):
+        batch_id = str(record.data.get("review_batch_id") or "__legacy_rereview_batch__")
+        if batch_id not in fallback_order:
+            fallback_order[batch_id] = len(fallback_order)
+
+    decision_batches_by_finding: dict[str, set[str]] = {}
+    for finding_id, batch_id, _reviewer in decisions:
+        decision_batches_by_finding.setdefault(finding_id, set()).add(batch_id)
+
+    applicable_batches_by_finding: dict[str, list[str]] = {}
+    for batch_id, batch_record in batch_records.items():
+        for finding_id in batch_record.data.get("source_finding_ids") or []:
+            applicable_batches_by_finding.setdefault(str(finding_id), []).append(batch_id)
+
+    latest_by_finding: dict[str, tuple[str, set[str], dict[str, str]]] = {}
+    finding_ids = set(decision_batches_by_finding) | set(applicable_batches_by_finding)
+    for finding_id in finding_ids:
+        applicable_batch_ids = applicable_batches_by_finding.get(finding_id, [])
+        if applicable_batch_ids:
+            latest_batch_id = applicable_batch_ids[-1]
+        else:
+            latest_batch_id = max(
+                decision_batches_by_finding[finding_id],
+                key=lambda batch_id: (
+                    batch_id in batch_order,
+                    batch_order.get(batch_id, fallback_order.get(batch_id, -1)),
+                ),
+            )
+        batch_decisions = {
+            reviewer: decision
+            for (decision_finding_id, batch_id, reviewer), decision in decisions.items()
+            if decision_finding_id == finding_id and batch_id == latest_batch_id
+        }
+        selected_batch = batch_records.get(latest_batch_id)
+        expected_reviewers = expected_reviewers_for_batch(records, selected_batch) if selected_batch else set()
+        if not expected_reviewers:
+            expected_reviewers = set(batch_decisions)
+        latest_by_finding[finding_id] = (latest_batch_id, expected_reviewers, batch_decisions)
+    return latest_by_finding
+
+
+def latest_rereview_decisions(records: list[Record]) -> dict[tuple[str, str], str]:
+    """Return reviewer decisions from each finding's latest ReviewBatch."""
+
+    return {
+        (finding_id, reviewer): decision
+        for finding_id, (_batch_id, _expected, decisions) in _latest_rereview_batch_decisions(records).items()
+        for reviewer, decision in decisions.items()
+    }
+
+
 def unresolved_blockers(records: list[Record]) -> list[str]:
     unresolved: list[str] = []
     resolved_states = {"resolved", "verified", "rejection_accepted", "closed"}
-    for record in records_by_type(records, "CanonicalFinding"):
+    latest_batches = _latest_rereview_batch_decisions(records)
+    for record in records_by_type(records, "NormalizedFinding"):
         data = record.data
+        finding_id = str(data.get("normalized_finding_id"))
         in_scope = data.get("scope_classification") == "in_scope"
         blocking = data.get("blocking_status") in {"blocking", "promoted_by_human"}
         material = data.get("materiality") == "material" or data.get("materiality_status") in {
@@ -462,17 +568,31 @@ def unresolved_blockers(records: list[Record]) -> list[str]:
             "disputed_materiality",
         }
         lifecycle = data.get("lifecycle_state")
-        if in_scope and blocking and material and lifecycle not in resolved_states:
-            unresolved.append(str(data.get("canonical_finding_id")))
+        latest_batch = latest_batches.get(finding_id)
+        expected_reviewers = latest_batch[1] if latest_batch else set()
+        reviewer_decisions = latest_batch[2] if latest_batch else {}
+        current_decisions = [reviewer_decisions[reviewer] for reviewer in expected_reviewers if reviewer in reviewer_decisions]
+        complete_rereview_batch = bool(expected_reviewers) and expected_reviewers <= reviewer_decisions.keys()
+        unanimous_rereview_resolution = (
+            complete_rereview_batch
+            and len(set(current_decisions)) == 1
+            and current_decisions[0] in RESOLVING_REREVIEW_DECISIONS
+        )
+        unresolved_rereview = bool(latest_batch) and not unanimous_rereview_resolution
+        lifecycle_resolved = lifecycle in resolved_states and not unresolved_rereview
+        if in_scope and blocking and material and not lifecycle_resolved and not unanimous_rereview_resolution:
+            unresolved.append(finding_id)
     return unresolved
 
 
 def unresolved_needs_human(records: list[Record]) -> list[str]:
-    finding_ids: list[str] = []
-    for record in records_by_type(records, "ReReviewDecision"):
-        if record.data.get("decision") == "needs_human":
-            finding_ids.append(str(record.data.get("canonical_finding_id")))
-    return finding_ids
+    return sorted(
+        {
+            finding_id
+            for (finding_id, _), decision in latest_rereview_decisions(records).items()
+            if decision == "needs_human"
+        }
+    )
 
 
 def max_remediation_rounds_per_finding(records: list[Record]) -> int:
@@ -502,7 +622,7 @@ def rereview_attempt_records(
 ) -> list[Record]:
     attempts: list[Record] = []
     for record in records_by_type(records, "ReReviewDecision"):
-        if str(record.data.get("canonical_finding_id")) != finding_id:
+        if str(record.data.get("normalized_finding_id")) != finding_id:
             continue
         if reviewer_identity is not None and str(record.data.get("reviewer_identity")) != reviewer_identity:
             continue
@@ -513,7 +633,7 @@ def rereview_attempt_records(
 def rereview_attempt_counts(records: list[Record]) -> dict[tuple[str, str], int]:
     counts: dict[tuple[str, str], int] = {}
     for record in records_by_type(records, "ReReviewDecision"):
-        finding_id = str(record.data.get("canonical_finding_id"))
+        finding_id = str(record.data.get("normalized_finding_id"))
         reviewer_identity = str(record.data.get("reviewer_identity"))
         counts[(finding_id, reviewer_identity)] = counts.get((finding_id, reviewer_identity), 0) + 1
     return counts

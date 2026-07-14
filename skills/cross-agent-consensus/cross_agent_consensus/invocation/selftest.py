@@ -5,7 +5,7 @@ and that SKILL.md still carries the literal alias phrase the LLM routers
 use to resolve `cac:` triggers.
 
 Routing across Claude Code, Codex, and Hermes is LLM-based — there is no
-canonical "trigger -> skill" registry to write into. This module's job is
+authoritative "trigger -> skill" registry to write into. This module's job is
 to surface what we CAN check (install location + manifest integrity +
 description-phrase presence) and to give the operator a deterministic
 exit code per host.
@@ -115,25 +115,30 @@ def _check_hermes_enabled(install_path: Path) -> list[str]:
     hermes_bin = shutil.which("hermes")
     if not hermes_bin:
         return []
+    env = os.environ.copy()
+    # Hermes renders ``skills list`` as a terminal-width-aware Rich table.
+    # Narrow captured output truncates ``cross-agent-consensus`` and causes a
+    # false missing-skill report.  Request a wide enabled-only view so the
+    # exact installed name survives non-interactive capture.
+    env["COLUMNS"] = "240"
     try:
         completed = subprocess.run(
-            [hermes_bin, "skills", "list"],
+            [hermes_bin, "skills", "list", "--enabled-only"],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return [f"hermes skills list failed: {exc}"]
     if completed.returncode != 0:
         return [f"hermes skills list exit {completed.returncode}: {completed.stderr.strip()}"]
-    # We do not depend on a strict format; we look for the skill name + a hint
-    # of enabled/disabled status. Treat absence of an "enabled" marker as a warning.
+    # Do not depend on table borders or column ordering. ``--enabled-only``
+    # makes an exact-name match sufficient.
     matches = [line for line in completed.stdout.splitlines() if "cross-agent-consensus" in line]
     if not matches:
-        return ["cross-agent-consensus not listed by hermes; run `hermes skills install`"]
-    if any("disabled" in line.lower() for line in matches):
-        return ["cross-agent-consensus is registered with Hermes but disabled; run `hermes skills config`"]
+        return ["cross-agent-consensus is not listed as enabled by Hermes; run `hermes skills config`"]
     return []
 
 

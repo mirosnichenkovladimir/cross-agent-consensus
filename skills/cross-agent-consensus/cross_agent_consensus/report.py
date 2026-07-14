@@ -11,6 +11,7 @@ from cross_agent_consensus.layout import FEEDBACK_FILENAME, REPORT_FILENAME
 from cross_agent_consensus.markdown_records import frontmatter
 from cross_agent_consensus.models import Record
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
+from cross_agent_consensus.run_audit import locked_run_command
 from cross_agent_consensus.termination import field_value
 from cross_agent_consensus.validation import unresolved_blockers, validator_status
 
@@ -29,18 +30,19 @@ _FINAL_REPORT_ID = "final-report-001"
 _ESCALATION_ID = "escalation-report-001"
 
 
-def _blocking_canonical_findings(records: list[Record]) -> list[Record]:
+def _unresolved_blocking_normalized_findings(records: list[Record]) -> list[Record]:
+    unresolved_ids = set(unresolved_blockers(records))
     result: list[Record] = []
-    for record in records_by_type(records, "CanonicalFinding"):
+    for record in records_by_type(records, "NormalizedFinding"):
         data = record.data
-        if data.get("scope_classification") == "in_scope" and data.get("blocking_status") == "blocking":
+        if data.get("normalized_finding_id") in unresolved_ids:
             result.append(record)
     return result
 
 
 def _blocker_section(index: int, record: Record) -> list[str]:
     data = record.data
-    finding_id = field_value(data.get("canonical_finding_id"), empty="unknown")
+    finding_id = field_value(data.get("normalized_finding_id"), empty="unknown")
     return [
         f"### Blocker {index} — {finding_id}",
         "",
@@ -58,10 +60,10 @@ def _blocker_section(index: int, record: Record) -> list[str]:
 
 def _supporting_record_ids(
     records: list[Record],
-    blocking_canonical_ids: list[str],
+    blocking_normalized_ids: list[str],
     include_escalation: bool,
 ) -> list[str]:
-    supporting: list[str] = list(blocking_canonical_ids)
+    supporting: list[str] = list(blocking_normalized_ids)
     for record_type in ["EscalationRecord", "HumanDecision", "AbortRecord"]:
         for record in records_by_type(records, record_type):
             if record.record_id and record.record_id not in supporting:
@@ -83,8 +85,8 @@ def build_report_skeleton(
     created_at = utc_now()
     status = validator_status(records)
     unresolved = unresolved_blockers(records)
-    blocking = _blocking_canonical_findings(records)
-    blocking_ids = [str(record.data.get("canonical_finding_id")) for record in blocking if record.data.get("canonical_finding_id")]
+    blocking = _unresolved_blocking_normalized_findings(records)
+    blocking_ids = [str(record.data.get("normalized_finding_id")) for record in blocking if record.data.get("normalized_finding_id")]
     include_escalation = terminal_condition == "escalated_to_human"
     unresolved_for_termination: list[str] = list(unresolved)
     if terminal_condition in {"escalated_to_human", "round_limit_reached"} and not unresolved_for_termination:
@@ -96,7 +98,7 @@ def build_report_skeleton(
         for index, record in enumerate(blocking, 1):
             lines.extend(_blocker_section(index, record))
     else:
-        lines.extend(["No in-scope blocking canonical findings recorded.", ""])
+        lines.extend(["No in-scope blocking normalized findings recorded.", ""])
 
     lines.extend(
         [
@@ -104,7 +106,7 @@ def build_report_skeleton(
             "",
             f"- terminal condition: `{terminal_condition}`",
             f"- final artifact version: `{final_artifact_version}`",
-            f"- unresolved CanonicalFinding ids: `{unresolved_for_termination if unresolved_for_termination else []}`",
+            f"- unresolved NormalizedFinding ids: `{unresolved_for_termination if unresolved_for_termination else []}`",
             f"- validators: `{status}`",
             "",
         ]
@@ -118,7 +120,7 @@ def build_report_skeleton(
                 frontmatter(
                     {
                         "record_type": "EscalationRecord",
-                        "schema_version": "m2-markdown-1",
+                        "schema_version": "m2-markdown-2",
                         "run_id": run.name,
                         "actor_identity": actor,
                         "created_at": created_at,
@@ -143,7 +145,7 @@ def build_report_skeleton(
             frontmatter(
                 {
                     "record_type": "TerminationRecord",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": actor,
                     "created_at": created_at,
@@ -166,7 +168,7 @@ def build_report_skeleton(
             frontmatter(
                 {
                     "record_type": "FinalReport",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": actor,
                     "created_at": created_at,
@@ -233,6 +235,7 @@ def _write_feedback_skeleton(run: Path, *, overwrite: bool) -> Path | None:
     return target
 
 
+@locked_run_command("report_skeleton_written")
 def cmd_report(args: argparse.Namespace) -> int:
     run = Path(args.run)
     try:

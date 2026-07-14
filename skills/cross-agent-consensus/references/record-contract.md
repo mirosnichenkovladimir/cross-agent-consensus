@@ -8,7 +8,7 @@ Every record file or record section must include:
 
 ```yaml
 record_type: <record type>
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run id>
 actor_identity: <actor identity that created the record>
 created_at: <ISO-8601 timestamp>
@@ -21,10 +21,20 @@ Every record also needs a stable type-specific id. Actor identities are lowercas
 The installed package version is strict semantic `MAJOR.MINOR.PATCH`; `scripts/consensus --version` prints it. New `run.md` metadata records:
 
 - `cross_agent_consensus_version`: installed package version;
-- `protocol_version`: record schema family, currently `m2-markdown-1`;
+- `protocol_version`: record schema family, currently `m2-markdown-2`;
 - `layout_version`: run tree contract, currently `round-first-1`.
 
-Individual protocol records keep `schema_version: m2-markdown-1`.
+Individual protocol records keep `schema_version: m2-markdown-2`.
+
+### Finding-name compatibility
+
+Current records use only `NormalizedFinding` and `normalized_finding_id`.
+The load boundary accepts `CanonicalFinding` and `canonical_finding_id` only
+from historical `m2-markdown-1` records, preserves the identifier value, and
+returns the current record model. A current-schema record containing either
+historical token is invalid. A run containing both historical and current
+finding records is invalid; migrate the whole run boundary instead of mixing
+the two contracts.
 
 ## Multi-Record Files
 
@@ -78,7 +88,7 @@ runs/<run_id>/
   backlog.md
 ```
 
-The run folder is a protocol artifact required by this package. It must exist before any Author/Reviewer/validator invocation. Exact prompts and raw host/CLI output must be copied into the run folder and referenced from protocol records; host scratch locations such as `/tmp` are not canonical evidence.
+The run folder is a protocol artifact required by this package. It must exist before any Author/Reviewer/validator invocation. Exact prompts and raw host/CLI output must be copied into the run folder and referenced from protocol records; host scratch locations such as `/tmp` are not recorded evidence.
 
 `rounds/round-NNN/reviews/<reviewer_identity>.md` preserves immutable raw reviewer output and that reviewer's RawFinding sections for that round. If the same reviewer is recalled for another ReviewBatch in the same round, use a qualified name such as `rounds/round-NNN/reviews/<reviewer_identity>-<review_batch_id>.md` so the earlier review remains immutable. The raw output must be copied into a clearly delimited fenced block and never rewritten after first capture.
 
@@ -115,7 +125,7 @@ runs/<run_id>/
 | RawReviewerOutput | `rounds/round-NNN/reviews/<reviewer_identity>.md` section |
 | RawFinding | `rounds/round-NNN/reviews/<reviewer_identity>.md` sections |
 | NormalizationRecord | `rounds/round-NNN/normalization.md` section |
-| CanonicalFinding | `rounds/round-NNN/normalization.md` section |
+| NormalizedFinding | `rounds/round-NNN/normalization.md` section |
 | MaterialityChallenge | `rounds/round-NNN/normalization.md` section |
 | AuthorResponse | `rounds/round-NNN/author-responses.md` section |
 | ClarificationRecord | `rounds/round-NNN/author-responses.md` section |
@@ -138,28 +148,57 @@ runs/<run_id>/
 | `Participants` | `participants_record_id`, `orchestrator_identity`, `author_identity`, `reviewer_identities`, `human_supervisor_identity_or_null` |
 | `ReviewScope` | `review_scope_id`, `objective`, `in_scope`, `out_of_scope`, `review_modes_allowed`, `max_fresh_review_rounds`, `max_remediation_rounds_per_finding`, `promotion_policy_or_null` |
 | `ReviewBatch` | `review_batch_id`, `review_scope_id`, `review_mode`, `target_artifact_version_id`, `source_finding_ids`, `round_id` |
-| `ArtifactVersion` | `artifact_version_id`, `predecessor_id_or_null`, `content_locator`, `content_hash_or_null`, `produced_by` |
-| `RawReviewerOutput` | `raw_output_id`, `reviewer_identity`, `review_batch_id`, `artifact_version_id`, `raw_finding_ids`, `is_first_round_independent` |
+| `ArtifactVersion` | `artifact_version_id`, `predecessor_id_or_null`, `content_locator`, `content_hash_or_null`, `produced_by`; CLI-created local records also use `content_locator_base_or_null` |
+| `RawReviewerOutput` | `raw_output_id`, `reviewer_identity`, `review_batch_id`, `artifact_version_id`, `raw_finding_ids`, `is_first_round_independent`; CLI capture also records `raw_payload_path`, `raw_payload_sha256`, `capture_origin`, `session_id_or_null`, `session_path_or_null`, `prompt_sha256_or_null`, `session_exit_sha256_or_null` |
 | `RawFinding` | `raw_finding_id`, `reviewer_identity`, `artifact_version_id`, `review_batch_id`, `location`, `claim`, `evidence`, `severity_or_materiality_claim`, `scope_classification`, `blocking_status`, `suggested_fix_or_null` |
-| `NormalizationRecord` | `normalization_record_id`, `source_raw_finding_ids`, `normalizer_identity`, `classifier_identity`, `materiality`, `scope_classification`, `blocking_status`, `rationale`, `canonical_finding_id` |
-| `CanonicalFinding` | `canonical_finding_id`, `target_artifact_version_id`, `source_raw_finding_ids`, `normalization_record_id`, `materiality`, `materiality_status`, `scope_classification`, `blocking_status`, `lifecycle_state`, `claim`, `rationale_or_summary`, `clarification_pending` |
-| `MaterialityChallenge` | `materiality_challenge_id`, `canonical_finding_id`, `claimed_materiality`, `rationale`, `supporting_record_ids` |
-| `AuthorResponse` | `author_response_id`, `canonical_finding_id`, `response_type`, `rationale`, `resulting_artifact_version_id_or_null`, `clarification_request_or_null` |
-| `ClarificationRecord` | `clarification_record_id`, `canonical_finding_id`, `requested_by`, `responded_by`, `question`, `answer_or_reason_unavailable` |
-| `ReReviewDecision` | `re_review_decision_id`, `canonical_finding_id`, `reviewer_identity`, `decision`, `rationale`, `artifact_version_id_or_null`, `review_batch_id` |
-| `ValidationEvidence` | `validation_evidence_id`, `validator_id`, `target_artifact_version_id`, `result`, `payload_reference`, `produced_by`, `waiver_authority_or_null`, `waiver_rationale_or_null` |
+| `NormalizationRecord` | `normalization_record_id`, `source_raw_finding_ids`, `normalizer_identity`, `classifier_identity`, `materiality`, `scope_classification`, `blocking_status`, `rationale`, `normalized_finding_id` |
+| `NormalizedFinding` | `normalized_finding_id`, `target_artifact_version_id`, `source_raw_finding_ids`, `normalization_record_id`, `materiality`, `materiality_status`, `scope_classification`, `blocking_status`, `lifecycle_state`, `claim`, `rationale_or_summary`, `clarification_pending` |
+| `MaterialityChallenge` | `materiality_challenge_id`, `normalized_finding_id`, `claimed_materiality`, `rationale`, `supporting_record_ids` |
+| `AuthorResponse` | `author_response_id`, `normalized_finding_id`, `response_type`, `rationale`, `resulting_artifact_version_id_or_null`, `clarification_request_or_null` |
+| `ClarificationRecord` | `clarification_record_id`, `normalized_finding_id`, `requested_by`, `responded_by`, `question`, `answer_or_reason_unavailable` |
+| `ReReviewDecision` | `re_review_decision_id`, `normalized_finding_id`, `reviewer_identity`, `decision`, `rationale`, `artifact_version_id_or_null`, `review_batch_id` |
+| `ValidationEvidence` | `validation_evidence_id`, `validator_id`, `target_artifact_version_id`, `result`, `payload_reference`, `produced_by`, `waiver_authority_or_null`, `waiver_rationale_or_null`; CLI capture also records `payload_sha256`, `capture_origin`, `session_id_or_null`, `session_path_or_null`, `prompt_sha256_or_null`, `session_exit_sha256_or_null` |
 | `EscalationRecord` | `escalation_record_id`, `affected_finding_ids`, `reason`, `requested_authority` |
 | `HumanDecision` | `human_decision_id`, `affected_finding_ids_or_validator_ids`, `decision_type`, `rationale`, `binding_authority`, `requires_new_artifact_version` |
 | `AbortRecord` | `abort_record_id`, `trigger_actor`, `reason`, `artifact_version_id_or_null`, `unresolved_finding_ids` |
 | `TerminationRecord` | `termination_record_id`, `terminal_condition`, `reason`, `final_artifact_version_id_or_null`, `unresolved_finding_ids`, `supporting_record_ids` |
 | `FinalReport` | `final_report_id`, `termination_record_id`, `terminal_condition`, `final_artifact_version_id_or_null`, `validator_status`, `unresolved_finding_ids`, `backlog_path` |
 | `ConfigResolution` | `config_resolution_id`, `config_schema_version`, `sources`, `effective_values`, `diagnostics`, `redactions` |
+| `OperatorApproval` | `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, `operator_identity_or_null`; CLI-created approvals also record `approval_binding_version: exact-inputs-1` and `approved_invocations` |
 
 ReviewBatch sections may use optional frontmatter `review_focus` to record review lenses or emphasis areas. `review_focus` never changes Participants and must not be used as `reviewer_identity`.
 
 Conclusion-validation ReviewBatch sections use optional frontmatter `batch_purpose: conclusion_validation` and `expected_reviewer_identities` to name the recalled reviewers. A Policy section may use optional `skipped_conclusion_validation_batch_ids` to record conclusion-validation batches intentionally skipped by policy authority.
 
 When a ConfigResolution section contains `reviewer_clis.<reviewer>.command`, RawReviewerOutput from that reviewer is only terminally valid when the active round also contains a completed `rounds/round-NNN/agents/<reviewer>/session-*` invocation session for phase `reviewer`.
+
+`capture_origin` is one of `live_cli`, `manual_import`, `host_subagent`, or
+`stdin`. `live_cli` requires `session_id_or_null`, `session_path_or_null`, and
+`prompt_sha256_or_null`, and `session_exit_sha256_or_null` to identify the
+completed invocation. `exit.json` binds the digests of `invocation.json`,
+`command.json`, `prompt.md`, stdout, stderr, copied raw output, and extracted
+final output. The command digest and working directory must match an
+`approved_invocations` binding for the same actor, phase, prompt, and
+ArtifactVersion.
+
+## Run Mutation Journal
+
+CLI-created runs append successful protocol mutations to root `events.jsonl`.
+New journals use schema `cross-agent-consensus-run-event-2`. Each JSON line
+records a monotonic `sequence`, `created_at`, `run_id`, `actor_identity`,
+`event_type`, `phase_before`, `phase_after`, command-specific `details`, the
+previous event digest, and its own digest. Root `.cac-events-anchor.json`
+records the event count, last event digest, and full `events.jsonl` digest.
+Validation requires `run_initialized`, adjacent phase continuity, a matching
+anchor, and agreement between the last event phase and the phase derived from
+protocol records. Version-1 journals remain readable for runs whose recorded
+package version predates 0.10.0 and which have no version-2 anchor. A mutable
+event `schema_version` value alone cannot select legacy validation.
+
+The current phase is derived from protocol records; `events.jsonl` is an audit
+journal, not a second source of lifecycle state. Mutating commands acquire
+root `.cac.lock`. `.cac.lock`, `events.jsonl`, and `.cac-events-anchor.json`
+are audit files, not protocol records.
 
 ## Enum Values
 

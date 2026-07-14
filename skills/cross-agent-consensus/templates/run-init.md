@@ -7,7 +7,7 @@ Fill this file before reviewer work starts. If a required field is unknown, stop
 - `run_id`: `<run_id>`
 - `run_root`: `runs/<run_id>/`
 - `cross_agent_consensus_version`: `<major.minor.patch>`
-- `protocol_version`: `m2-markdown-1`
+- `protocol_version`: `m2-markdown-2`
 - `layout_version`: `round-first-1`
 - prompt payload root: `rounds/round-001/prompts/`
 - raw-output payload root: `rounds/round-001/raw/`
@@ -21,7 +21,7 @@ Fill this file before reviewer work starts. If a required field is unknown, stop
 ## TaskBrief task-brief-<run_id>
 ---
 record_type: TaskBrief
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
@@ -43,7 +43,7 @@ human_supervisor_identity_or_null: <human-supervisor-identity-or-none>
 ## Policy policy-<run_id>
 ---
 record_type: Policy
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
@@ -86,7 +86,7 @@ waiver_authority_or_null: <policy-or-human-decision-or-null>
 ## Participants participants-<run_id>
 ---
 record_type: Participants
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
@@ -109,7 +109,7 @@ human_supervisor_identity_or_null: <human-supervisor-identity-or-none>
 ## ReviewScope review-scope-<run_id>
 ---
 record_type: ReviewScope
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>

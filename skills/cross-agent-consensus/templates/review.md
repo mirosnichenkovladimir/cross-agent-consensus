@@ -5,7 +5,7 @@ Place this file at `rounds/round-NNN/reviews/<reviewer_identity>.md`. Preserve r
 ## RawReviewerOutput raw-output-round-<n>-<reviewer_identity>
 ---
 record_type: RawReviewerOutput
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
@@ -32,7 +32,7 @@ Do not edit this fenced block after first capture.
 ## RawFinding raw-finding-round-<n>-<reviewer_identity>-001
 ---
 record_type: RawFinding
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>

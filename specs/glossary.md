@@ -12,7 +12,7 @@ Terms used in `specs/protocol.md`. See section references for normative definiti
 
 ## Artifacts and policy
 
-- **Artifact**: The thing being produced or reviewed: document, design, code diff, UI, plan, etc.
+- **Artifact**: The work product being produced or reviewed: document, design, code diff, UI, plan, etc.
 - **Artifact Version**: Immutable reference to one version of an artifact (`ArtifactVersion` record, §4).
 - **Task Brief**: Original task context and success criteria.
 - **Policy**: Per-run rules for severity, materiality, round limits, validators, and escalation.
@@ -23,10 +23,10 @@ Terms used in `specs/protocol.md`. See section references for normative definiti
 ## Finding objects
 
 - **Raw Finding**: Immutable reviewer output tied to exactly one Artifact Version (`RawFinding` record, §4; invariants 4–5).
-- **Canonical Finding**: Normalized lifecycle object that may aggregate related Raw Findings while preserving links to them (`CanonicalFinding` record, §4; invariant 6).
-- **Normalization Record**: Audits the mapping from Raw Findings to a Canonical Finding (`NormalizationRecord` record, §4).
-- **Materiality Challenge**: Disputes a Canonical Finding's materiality classification (`MaterialityChallenge` record, §4); may be raised by any participating reviewer, the Orchestrator, or a Human Decision.
-- **Author Response**: Author's explicit response to a material in-scope blocking Canonical Finding (`AuthorResponse` record, §4; invariant 7). Response types: `accept`, `reject`, `partially_accept`, `request_clarification`.
+- **Normalized Finding**: Normalized lifecycle object that may aggregate related Raw Findings while preserving links to them (`NormalizedFinding` record, §4; invariant 6).
+- **Normalization Record**: Audits the mapping from Raw Findings to a Normalized Finding (`NormalizationRecord` record, §4).
+- **Materiality Challenge**: Disputes a Normalized Finding's materiality classification (`MaterialityChallenge` record, §4); may be raised by any participating reviewer, the Orchestrator, or a Human Decision.
+- **Author Response**: Author's explicit response to a material in-scope blocking Normalized Finding (`AuthorResponse` record, §4; invariant 7). Response types: `accept`, `reject`, `partially_accept`, `request_clarification`.
 - **Clarification Record**: Records a clarification sub-loop opened by `request_clarification` (`ClarificationRecord` record, §4).
 - **Re-Review Decision**: Reviewer decision after inspecting Author Response and any revised artifact (`ReReviewDecision` record, §4). Decisions: `verified`, `rejection_accepted`, `still_valid`, `disputed`, `needs_human`.
 - **Validation Evidence**: Non-opinion evidence produced by validators (`ValidationEvidence` record, §4). Results: `pass`, `fail`, `error`, `waived`. A `waived` result MUST identify the granting policy or human authority.

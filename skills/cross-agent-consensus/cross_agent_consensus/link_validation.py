@@ -21,7 +21,7 @@ class LinkIndex:
     batches: set[Any]
     raw_findings: set[Any]
     normalizations: set[Any]
-    canonical_findings: set[Any]
+    normalized_findings: set[Any]
     termination_records: set[Any]
     validators: set[str]
     reviewers: set[Any]
@@ -40,9 +40,9 @@ def build_link_index(records: list[Record], validators: list[str]) -> LinkIndex:
             record.data.get("normalization_record_id")
             for record in records_by_type(records, "NormalizationRecord")
         },
-        canonical_findings={
-            record.data.get("canonical_finding_id")
-            for record in records_by_type(records, "CanonicalFinding")
+        normalized_findings={
+            record.data.get("normalized_finding_id")
+            for record in records_by_type(records, "NormalizedFinding")
         },
         termination_records={
             record.data.get("termination_record_id")
@@ -123,9 +123,9 @@ def _normalization_messages(records: list[Record], index: LinkIndex) -> list[str
         for raw_finding_id in record.data.get("source_raw_finding_ids") or []:
             if raw_finding_id not in index.raw_findings:
                 messages.append(f"{prefix}: source raw finding not found: {raw_finding_id}")
-        if record.data.get("canonical_finding_id") not in index.canonical_findings:
-            messages.append(f"{prefix}: canonical_finding_id not found")
-    for record in records_by_type(records, "CanonicalFinding"):
+        if record.data.get("normalized_finding_id") not in index.normalized_findings:
+            messages.append(f"{prefix}: normalized_finding_id not found")
+    for record in records_by_type(records, "NormalizedFinding"):
         prefix = _record_prefix(record)
         if record.data.get("target_artifact_version_id") not in index.artifacts:
             messages.append(f"{prefix}: target artifact not found")
@@ -142,8 +142,8 @@ def _finding_lifecycle_messages(records: list[Record], index: LinkIndex) -> list
     for record_type in ["MaterialityChallenge", "AuthorResponse", "ClarificationRecord", "ReReviewDecision"]:
         for record in records_by_type(records, record_type):
             prefix = _record_prefix(record)
-            if record.data.get("canonical_finding_id") not in index.canonical_findings:
-                messages.append(f"{prefix}: canonical finding not found")
+            if record.data.get("normalized_finding_id") not in index.normalized_findings:
+                messages.append(f"{prefix}: normalized finding not found")
             if record_type == "AuthorResponse":
                 artifact = record.data.get("resulting_artifact_version_id_or_null")
                 if artifact and artifact not in index.artifacts:
@@ -169,13 +169,13 @@ def _decision_and_evidence_messages(records: list[Record], index: LinkIndex) -> 
             messages.append(f"{_record_prefix(record)}: target_artifact_version_id not found")
     for record in records_by_type(records, "EscalationRecord"):
         for finding_id in record.data.get("affected_finding_ids") or []:
-            if finding_id != RUN_SCOPE_SENTINEL and finding_id not in index.canonical_findings:
+            if finding_id != RUN_SCOPE_SENTINEL and finding_id not in index.normalized_findings:
                 messages.append(f"{_record_prefix(record)}: affected finding not found: {finding_id}")
     for record in records_by_type(records, "HumanDecision"):
         for target_id in record.data.get("affected_finding_ids_or_validator_ids") or []:
             if (
                 target_id != RUN_SCOPE_SENTINEL
-                and target_id not in index.canonical_findings
+                and target_id not in index.normalized_findings
                 and target_id not in index.validators
             ):
                 messages.append(f"{_record_prefix(record)}: affected finding or validator not found: {target_id}")
@@ -190,7 +190,7 @@ def _terminal_record_messages(run: Path, records: list[Record], index: LinkIndex
         if artifact and artifact not in index.artifacts:
             messages.append(f"{prefix}: artifact_version_id_or_null not found")
         for finding_id in record.data.get("unresolved_finding_ids") or []:
-            if finding_id not in index.canonical_findings:
+            if finding_id not in index.normalized_findings:
                 messages.append(f"{prefix}: unresolved finding not found: {finding_id}")
     for record in records_by_type(records, "TerminationRecord"):
         prefix = _record_prefix(record)
@@ -198,7 +198,7 @@ def _terminal_record_messages(run: Path, records: list[Record], index: LinkIndex
         if artifact and artifact not in index.artifacts:
             messages.append(f"{prefix}: final artifact not found: {artifact}")
         for finding_id in record.data.get("unresolved_finding_ids") or []:
-            if finding_id not in index.canonical_findings:
+            if finding_id not in index.normalized_findings:
                 messages.append(f"{prefix}: unresolved finding not found: {finding_id}")
     for record in records_by_type(records, "FinalReport"):
         prefix = _record_prefix(record)
@@ -208,7 +208,7 @@ def _terminal_record_messages(run: Path, records: list[Record], index: LinkIndex
         if artifact and artifact not in index.artifacts:
             messages.append(f"{prefix}: final artifact not found: {artifact}")
         for finding_id in record.data.get("unresolved_finding_ids") or []:
-            if finding_id not in index.canonical_findings:
+            if finding_id not in index.normalized_findings:
                 messages.append(f"{prefix}: unresolved finding not found: {finding_id}")
         backlog_path = record.data.get("backlog_path")
         if backlog_path and not (run / str(backlog_path)).exists():

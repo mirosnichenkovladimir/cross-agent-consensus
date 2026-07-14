@@ -22,6 +22,10 @@ class RunSnapshot:
     by_type: dict[str, list[Record]]
 
 
+class FindingSchemaError(ValueError):
+    """A run crossed the historical/current finding schema boundary."""
+
+
 def unique_narrative_finding_ids(text: str) -> set[str]:
     """Return the set of narrative finding IDs in `text`, lowercased."""
     return {match.group(0).lower() for match in NARRATIVE_FINDING_ID_RE.finditer(text)}
@@ -49,6 +53,22 @@ def parse_run_snapshot(run: Path) -> RunSnapshot:
         parsed = parse_records_with_diagnostics(path)
         records.extend(parsed.records)
         diagnostics.extend(parsed.diagnostics)
+    legacy_finding_records = [
+        record for record in records if record.finding_schema_origin == "legacy"
+    ]
+    current_finding_records = [
+        record for record in records if record.finding_schema_origin == "current"
+    ]
+    if legacy_finding_records and current_finding_records:
+        current = current_finding_records[0]
+        diagnostics.append(
+            RecordParseDiagnostic(
+                current.path,
+                current.heading_line,
+                "run mixes historical and current finding records",
+                code="finding_schema",
+            )
+        )
     by_type: dict[str, list[Record]] = {}
     for record in records:
         by_type.setdefault(record.record_type, []).append(record)
@@ -56,7 +76,19 @@ def parse_run_snapshot(run: Path) -> RunSnapshot:
 
 
 def parse_run_records(run: Path) -> list[Record]:
-    return parse_run_snapshot(run).records
+    snapshot = parse_run_snapshot(run)
+    finding_schema_diagnostics = [
+        diagnostic
+        for diagnostic in snapshot.diagnostics
+        if diagnostic.code == "finding_schema"
+    ]
+    if finding_schema_diagnostics:
+        messages = "; ".join(
+            f"{diagnostic.path}:{diagnostic.heading_line}: {diagnostic.message}"
+            for diagnostic in finding_schema_diagnostics
+        )
+        raise FindingSchemaError(messages)
+    return snapshot.records
 
 
 def records_by_type(records: Iterable[Record], record_type: str) -> list[Record]:
@@ -70,5 +102,8 @@ def first_record(records: Iterable[Record], record_type: str) -> Record | None:
     return None
 
 
-def canonical_finding_ids(records: Iterable[Record]) -> set[str]:
-    return {str(record.data.get("canonical_finding_id")) for record in records_by_type(records, "CanonicalFinding")}
+def normalized_finding_ids(records: Iterable[Record]) -> set[str]:
+    return {
+        str(record.data.get("normalized_finding_id"))
+        for record in records_by_type(records, "NormalizedFinding")
+    }

@@ -9,9 +9,9 @@ Each round walks the phases below in order. A phase MAY be skipped when no work 
 1. **Initialization** (first round only) — record Task Brief, Policy, Review Scope, participant roles, validators, initial Artifact Version (if any), and round limits (§6.1).
 2. **Author phase** — Author Agent produces or revises an Artifact Version (§6.3). Every revision creates a new `ArtifactVersion` record (inv. 13).
 3. **Independent review phase** — each Reviewer Agent emits Raw Findings against the target Artifact Version. First-round reviewers MUST NOT see other reviewers' findings (inv. 3). Each Raw Finding classifies scope and blocking status (§6.4).
-4. **Normalization phase** — Raw Findings become Canonical Findings via a Normalization Record. Raw Findings are immutable (inv. 4, §6.5). Materiality challenges MAY be opened here.
+4. **Normalization phase** — Raw Findings become Normalized Findings via a Normalization Record. Raw Findings are immutable (inv. 4, §6.5). Materiality challenges MAY be opened here.
 5. **Conclusion validation** (optional, §6.5.1) — a `scope_triage` batch with `batch_purpose=conclusion_validation` recalls reviewers to validate the proposed conclusions before Author Response (inv. 17).
-6. **Author response phase** — Author responds to every in-scope blocking material Canonical Finding (inv. 7, §6.6). Response types: `accept`, `reject`, `partially_accept`, `request_clarification`.
+6. **Author response phase** — Author responds to every in-scope blocking material Normalized Finding (inv. 7, §6.6). Response types: `accept`, `reject`, `partially_accept`, `request_clarification`.
 7. **Optional revision** — if the Author response includes a revision, the Orchestrator returns to the Author phase to record the new Artifact Version, then proceeds to re-review.
 8. **Re-review phase** — Reviewer Agents inspect the Author Response and any revised Artifact Version and emit `ReReviewDecision` records (§6.7). Decisions: `verified`, `rejection_accepted`, `still_valid`, `disputed`, `needs_human`.
 9. **Termination evaluation** — the Orchestrator evaluates terminal conditions (§6.8) and either declares a terminal outcome or starts another round.
@@ -21,7 +21,7 @@ Each round walks the phases below in order. A phase MAY be skipped when no work 
 - **Clarification sub-loop** — `request_clarification` opens a Clarification Record. The finding remains `open` with `clarification_pending=true`. The sub-loop does not consume a new round unless a profile says otherwise (§6.6).
 - **Materiality challenge** — a `MaterialityChallenge` MAY be raised by any participating reviewer, the Orchestrator, or a Human Decision during Normalization, Author Response, or Re-Review (§6.5). It MUST NOT be raised after Termination begins. While unresolved, the finding's `materiality_status=disputed_materiality` and the finding is treated as material.
 
-## Canonical finding lifecycle
+## Normalized finding lifecycle
 
 States (§7):
 
@@ -46,7 +46,7 @@ Findings are created with `materiality_status=undisputed`. A `MaterialityChallen
 
 ### Multi-reviewer aggregation
 
-When multiple reviewers re-review the same material Canonical Finding in the same batch, evaluate the rules below in order; the first match determines the next state (§7):
+When multiple reviewers re-review the same material Normalized Finding in the same batch, evaluate the rules below in order; the first match determines the next state (§7):
 
 1. If any reviewer records `needs_human`, the next state is `escalated`.
 2. If all reviewers record the same resolving decision, the next state is that decision's mapped state.
@@ -59,7 +59,7 @@ Review focus/lens values are optional `ReviewBatch` prompt-lensing metadata. The
 
 ## Conclusion validation
 
-After Raw Findings are sealed and normalized, the Orchestrator MAY schedule a conclusion-validation batch before Author Response (§6.5.1). The batch is a `scope_triage` batch with `batch_purpose=conclusion_validation`, `source_finding_ids` listing the Canonical Findings under review, and `expected_reviewer_identities` naming the recalled reviewers.
+After Raw Findings are sealed and normalized, the Orchestrator MAY schedule a conclusion-validation batch before Author Response (§6.5.1). The batch is a `scope_triage` batch with `batch_purpose=conclusion_validation`, `source_finding_ids` listing the Normalized Findings under review, and `expected_reviewer_identities` naming the recalled reviewers.
 
 Proposed conclusions: `valid_blocker`, `duplicate`, `non_material`, `out_of_scope`, `false_positive`, `deferred`, `needs_human`, `unclear`.
 

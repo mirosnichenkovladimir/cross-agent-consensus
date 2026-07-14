@@ -17,6 +17,7 @@ from pathlib import Path
 
 from cross_agent_consensus.invocation.adapters import PLAYER_ALIASES
 from cross_agent_consensus import capture
+from cross_agent_consensus.approval import approval_binding, stamp_operator_approval
 from cross_agent_consensus.invocation import process_monitor
 from cross_agent_consensus.invocation.process_monitor import (
     DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
@@ -27,9 +28,8 @@ from cross_agent_consensus.invocation.readiness import (
     invocation_ready_errors,
     policy_allows_unattended_scoped,
 )
-from cross_agent_consensus.io import append_text, atomic_write_new, eprint, slugify, utc_now
-from cross_agent_consensus.layout import detect_run_layout, normalize_round_id, round_dir, DEFAULT_LAYOUT
-from cross_agent_consensus.markdown_records import frontmatter
+from cross_agent_consensus.io import eprint
+from cross_agent_consensus.layout import normalize_round_id, record_round_number, round_number
 from cross_agent_consensus.models import (
     CaptureCommandInput,
     InvocationCommandInput,
@@ -39,22 +39,8 @@ from cross_agent_consensus.models import (
     RunCommandInput,
 )
 from cross_agent_consensus.prompt_command import cmd_prompt
+from cross_agent_consensus.prompts import prompt_target, raw_output_target
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
-
-
-PHASE_TO_PROMPT_SUBDIR = {
-    "reviewer": "reviewers",
-    "rereview": "reviewers",
-    "validator": "validators",
-    "author": "",  # author prompt is at rounds/<round>/prompts/author.md
-}
-
-PHASE_TO_RAW_SUBDIR = {
-    "reviewer": "reviewers",
-    "rereview": "reviewers",
-    "validator": "validators",
-    "author": "",
-}
 
 
 @dataclass(frozen=True)
@@ -102,7 +88,7 @@ def _resolve_actors(
         policy = first_record(records, "Policy")
         return [str(value) for value in policy.data.get("required_validator_ids") or []] if policy else []
     if phase in ("reviewer", "rereview"):
-        batches = [r for r in records_by_type(records, "ReviewBatch") if str(r.data.get("round_id")) == round_id]
+        batches = _round_review_batches(records, round_id)
         active = batches[-1] if batches else None
         if active is not None:
             expected = active.data.get("expected_reviewer_identities") or []
@@ -120,9 +106,9 @@ def _resolve_actors(
 def _player_for_actor(actor: str) -> str:
     """Map an actor identity to a player id; falls back to generic-cli."""
 
-    canonical = PLAYER_ALIASES.get(actor)
-    if canonical:
-        return canonical
+    resolved_player_id = PLAYER_ALIASES.get(actor)
+    if resolved_player_id:
+        return resolved_player_id
     if actor in ("manual",):
         return "manual"
     return "generic-cli"
@@ -154,24 +140,6 @@ def _runtime_command_for_actor(records: list[Record], actor: str) -> list[str]:
     return []
 
 
-def _prompt_path(run: Path, round_id: str, phase: str, actor: str) -> Path:
-    base = round_dir(run, round_id) / "prompts"
-    subdir = PHASE_TO_PROMPT_SUBDIR.get(phase, "")
-    if phase == "author":
-        return base / "author.md"
-    if phase == "validator":
-        return base / "validators" / f"{slugify(actor)}.md"
-    return base / subdir / f"{slugify(actor)}.md"
-
-
-def _raw_output_path(run: Path, round_id: str, phase: str, actor: str) -> Path:
-    base = round_dir(run, round_id) / "raw"
-    if phase == "author":
-        return base / "author.out"
-    subdir = PHASE_TO_RAW_SUBDIR.get(phase, "")
-    return base / subdir / f"{slugify(actor)}.out"
-
-
 def _single_or_none(records: list[Record], record_type: str, id_field: str) -> str | None:
     matches = records_by_type(records, record_type)
     if len(matches) == 1:
@@ -180,12 +148,20 @@ def _single_or_none(records: list[Record], record_type: str, id_field: str) -> s
     return None
 
 
-def _active_review_batch_id(records: list[Record], round_id: str) -> str | None:
-    batches = [r for r in records_by_type(records, "ReviewBatch") if str(r.data.get("round_id")) == round_id]
+def _round_review_batches(records: list[Record], round_id: str) -> list[Record]:
+    target_round = round_number(round_id)
+    return [
+        record
+        for record in records_by_type(records, "ReviewBatch")
+        if record_round_number(record) == target_round
+    ]
+
+
+def _active_review_batch(records: list[Record], round_id: str) -> Record | None:
+    batches = _round_review_batches(records, round_id)
     if not batches:
         return None
-    value = batches[-1].data.get("review_batch_id")
-    return str(value) if value else None
+    return batches[-1]
 
 
 def _build_plan(
@@ -200,20 +176,40 @@ def _build_plan(
     stale_timeout_seconds: float,
     heartbeat_interval_seconds: float,
 ) -> ActorPlan:
+    batch = _active_review_batch(records, round_id)
+    batch_id_value = batch.data.get("review_batch_id") if batch else None
+    review_batch_id = str(batch_id_value) if batch_id_value else None
+    batch_artifact_value = batch.data.get("target_artifact_version_id") if batch else None
+    artifact_version_id = (
+        str(batch_artifact_value)
+        if batch_artifact_value
+        else _single_or_none(records, "ArtifactVersion", "artifact_version_id")
+    )
+    prompt_args = PromptCommandInput(
+        run=str(run),
+        phase=phase,
+        actor=actor,
+        round=round_id,
+        review_batch=review_batch_id,
+        artifact_version=artifact_version_id,
+        output=None,
+        force_draft=False,
+        dry_run=False,
+    )
     return ActorPlan(
         actor=actor,
         player=_player_for_actor(actor),
         phase=phase,
         round_id=round_id,
-        prompt_path=_prompt_path(run, round_id, phase, actor),
-        raw_output_path=_raw_output_path(run, round_id, phase, actor),
+        prompt_path=prompt_target(run, prompt_args, records),
+        raw_output_path=raw_output_target(run, prompt_args, records),
         cwd=cwd,
         runtime_command=_runtime_command_for_actor(records, actor),
         idle_timeout_seconds=idle_timeout_seconds,
         stale_timeout_seconds=stale_timeout_seconds,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
-        review_batch_id=_active_review_batch_id(records, round_id),
-        artifact_version_id=_single_or_none(records, "ArtifactVersion", "artifact_version_id"),
+        review_batch_id=review_batch_id,
+        artifact_version_id=artifact_version_id,
     )
 
 
@@ -239,7 +235,7 @@ def _finalize_prompts(run: Path, *, plans: list[ActorPlan]) -> list[str]:
             phase=plan.phase,
             actor=plan.actor,
             round=plan.round_id,
-            review_batch=None,
+            review_batch=plan.review_batch_id,
             artifact_version=plan.artifact_version_id,
             output=None,
             force_draft=False,
@@ -318,6 +314,7 @@ def _launch_all(
             stale_timeout_seconds=plan.stale_timeout_seconds,
             heartbeat_interval_seconds=plan.heartbeat_interval_seconds,
             command=list(plan.runtime_command),
+            require_existing_approval=True,
         )
         try:
             rc = process_monitor.cmd_invoke_agent(invoke_args)
@@ -388,79 +385,6 @@ def _capture_all(
             eprint(f"error: capture raised for actor {plan.actor}: {exc}")
             capture_rcs[plan.actor] = 1
     return capture_rcs
-
-
-# ---------------------------------------------------------------------------
-# OperatorApproval stamp
-# ---------------------------------------------------------------------------
-
-
-def _operator_approval_text(
-    *,
-    record_id: str,
-    run_id: str,
-    round_id: str,
-    phase: str,
-    actors: list[str],
-    mechanism: str,
-    operator_identity: str | None,
-    created_at: str,
-) -> str:
-    data = {
-        "record_type": "OperatorApproval",
-        "schema_version": "m2-markdown-1",
-        "run_id": run_id,
-        "actor_identity": "orchestrator-run-macro",
-        "created_at": created_at,
-        "operator_approval_id": record_id,
-        "approved_actors": list(actors),
-        "scope_run_id": run_id,
-        "scope_round_id": round_id,
-        "scope_phase": phase,
-        "mechanism": mechanism,
-        "operator_identity_or_null": operator_identity,
-    }
-    return "\n".join(
-        [
-            "",
-            f"## OperatorApproval {record_id}",
-            frontmatter(data),
-            "",
-        ]
-    )
-
-
-def _stamp_operator_approval(
-    run: Path,
-    *,
-    run_id: str,
-    round_id: str,
-    phase: str,
-    actors: list[str],
-    mechanism: str,
-    operator_identity: str | None,
-) -> Path:
-    created_at = utc_now()
-    record_id = f"operator-approval-{slugify(round_id)}-{slugify(phase)}-{created_at.replace(':', '').replace('-', '')}"
-    if detect_run_layout(run) == DEFAULT_LAYOUT:
-        target = round_dir(run, round_id) / "operator-approval.md"
-    else:
-        target = run / "operator-approval.md"
-    text = _operator_approval_text(
-        record_id=record_id,
-        run_id=run_id,
-        round_id=round_id,
-        phase=phase,
-        actors=actors,
-        mechanism=mechanism,
-        operator_identity=operator_identity,
-        created_at=created_at,
-    )
-    if target.exists():
-        append_text(target, text)
-    else:
-        atomic_write_new(target, text.lstrip("\n"))
-    return target
 
 
 # ---------------------------------------------------------------------------
@@ -623,15 +547,33 @@ def cmd_run(args: RunCommandInput) -> int:
     # Step 7 (precedes launches per design §Authoritative gating contract)
     mechanism = "policy_unattended" if scoped_matches else "cli_approved_flag"
     operator_identity = getattr(args, "operator_identity", None) or None
-    approval_path = _stamp_operator_approval(
-        run,
-        run_id=run.name,
-        round_id=round_id,
-        phase=phase,
-        actors=[plan.actor for plan in plans],
-        mechanism=mechanism,
-        operator_identity=operator_identity,
-    )
+    try:
+        bindings = [
+            approval_binding(
+                run,
+                records,
+                actor_identity=plan.actor,
+                player_id=plan.player,
+                phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
+                round_id=round_id,
+                prompt_path=plan.prompt_path,
+                command=plan.runtime_command,
+                artifact_version_id=plan.artifact_version_id,
+                working_directory=plan.cwd,
+            )
+            for plan in plans
+        ]
+        approval_path = stamp_operator_approval(
+            run,
+            round_id=round_id,
+            phase=phase,
+            bindings=bindings,
+            mechanism=mechanism,
+            operator_identity=operator_identity,
+        )
+    except ValueError as exc:
+        eprint(f"error: approval binding failed: {exc}")
+        return 3
     print(f"stamped OperatorApproval ({mechanism}): {approval_path}")
 
     # Steps 4–6 — launch + capture
@@ -652,6 +594,5 @@ __all__ = [
     "_launch_all",
     "_capture_all",
     "_emit_manual_fallback",
-    "_stamp_operator_approval",
     "_fallback_lines_for_plan",
 ]

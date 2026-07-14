@@ -9,18 +9,73 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "skills" / "cross-agent-consensus"
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from cross_agent_consensus.models import Record
+from cross_agent_consensus.models import PromptCommandInput, Record
 from cross_agent_consensus.prompts import (
     active_review_batches,
     is_conclusion_validation_batch,
     proposed_conclusion_for_finding,
     resolve_active_round,
+    round_first_prompt_target,
     select_review_batch,
     table_cell,
 )
 
 
 class PromptTests(unittest.TestCase):
+    def test_later_review_batch_does_not_relocate_first_batch_prompt(self) -> None:
+        run = Path("/tmp/sample-consensus-001")
+        records = [
+            Record(
+                "ReviewBatch",
+                "fresh",
+                Path("rounds/round-001/round.md"),
+                1,
+                {"review_batch_id": "fresh", "round_id": "round-1", "review_mode": "fresh_review"},
+            ),
+            Record(
+                "ReviewBatch",
+                "remediation",
+                Path("rounds/round-001/round.md"),
+                2,
+                {
+                    "review_batch_id": "remediation",
+                    "round_id": "round-1",
+                    "review_mode": "remediation_verification",
+                },
+            ),
+        ]
+        first_args = PromptCommandInput(
+            run=str(run),
+            phase="reviewer",
+            actor="codex",
+            artifact_version="v1",
+            round="round-1",
+            review_batch="fresh",
+            output=None,
+            force_draft=False,
+            dry_run=False,
+        )
+        later_args = PromptCommandInput(
+            run=str(run),
+            phase="reviewer",
+            actor="codex",
+            artifact_version="v2",
+            round="round-1",
+            review_batch="remediation",
+            output=None,
+            force_draft=False,
+            dry_run=False,
+        )
+
+        self.assertEqual(
+            round_first_prompt_target(run, first_args, records),
+            run / "rounds" / "round-001" / "prompts" / "reviewers" / "codex.md",
+        )
+        self.assertEqual(
+            round_first_prompt_target(run, later_args, records),
+            run / "rounds" / "round-001" / "prompts" / "reviewers" / "remediation" / "codex.md",
+        )
+
     def test_select_review_batch_matches_numeric_round_alias(self) -> None:
         records = [
             Record("ReviewBatch", "round-1", Path("round-001/round.md"), 1, {"round_id": "round-1"}),
@@ -87,12 +142,12 @@ class PromptTests(unittest.TestCase):
 
     def test_proposed_conclusion_defaults_ambiguous_material_findings_to_unclear(self) -> None:
         record = Record(
-            "CanonicalFinding",
-            "canonical-finding-001",
+            "NormalizedFinding",
+            "normalized-finding-001",
             Path("normalization.md"),
             1,
             {
-                "canonical_finding_id": "canonical-finding-001",
+                "normalized_finding_id": "normalized-finding-001",
                 "scope_classification": "in_scope",
                 "blocking_status": "non_blocking",
                 "materiality": "material",
@@ -166,7 +221,7 @@ class PromptTests(unittest.TestCase):
             {
                 "review_batch_id": "batch",
                 "review_mode": "scope_triage",
-                "source_finding_ids": ["canonical-finding-001"],
+                "source_finding_ids": ["normalized-finding-001"],
             },
         )
 

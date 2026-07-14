@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from cross_agent_consensus.models import ParsedRecordFile, Record, RecordParseDiagnostic
+from cross_agent_consensus.record_compatibility import decode_record, recognized_record_type
 from cross_agent_consensus.record_schema import FIELD_ALIASES, ID_FIELDS, KNOWN_RECORD_TYPES
 
 
@@ -205,7 +206,7 @@ def parse_records_with_diagnostics(path: Path) -> ParsedRecordFile:
             text, match.end(), record_frontmatter
         ):
             record_frontmatter = None
-        if heading_record_type not in KNOWN_RECORD_TYPES:
+        if not recognized_record_type(heading_record_type, KNOWN_RECORD_TYPES):
             if record_frontmatter is not None:
                 diagnostics.append(
                     RecordParseDiagnostic(
@@ -227,22 +228,35 @@ def parse_records_with_diagnostics(path: Path) -> ParsedRecordFile:
         block, _, _ = record_frontmatter
         data = parse_yaml_subset(block)
         heading_line = _heading_line(text, match.start())
-        record_type = data.get("record_type") or heading_record_type
-        if str(record_type) not in KNOWN_RECORD_TYPES:
+        try:
+            decoded = decode_record(heading_record_type, data, KNOWN_RECORD_TYPES)
+        except ValueError as exc:
             diagnostics.append(
                 RecordParseDiagnostic(
                     path,
                     heading_line,
-                    f"frontmatter declares unknown record type {record_type}",
+                    str(exc),
+                    code="finding_schema",
                 )
             )
             continue
-        _apply_field_aliases(str(record_type), data)
-        id_field = ID_FIELDS.get(str(record_type))
+        record_type = decoded.record_type
+        data = decoded.data
+        _apply_field_aliases(record_type, data)
+        id_field = ID_FIELDS.get(record_type)
         record_id = data.get(id_field) if id_field else None
         if not record_id:
             record_id = match.group("record_id")
-        records.append(Record(str(record_type), str(record_id), path, heading_line, data))
+        records.append(
+            Record(
+                record_type,
+                str(record_id),
+                path,
+                heading_line,
+                data,
+                finding_schema_origin=decoded.finding_schema_origin,
+            )
+        )
     if path.name.startswith("v") and path.parent.name == "artifacts":
         text = path.read_text(encoding="utf-8")
         if text.startswith("---"):
@@ -250,8 +264,20 @@ def parse_records_with_diagnostics(path: Path) -> ParsedRecordFile:
             if second:
                 end = 4 + second.start()
                 data = parse_yaml_subset(text[4:end])
-                _apply_field_aliases(str(data.get("record_type")), data)
-                if data.get("record_type") == "ArtifactVersion":
+                try:
+                    artifact_decoded = decode_record(
+                        str(data.get("record_type") or ""),
+                        data,
+                        KNOWN_RECORD_TYPES,
+                    )
+                except ValueError as exc:
+                    diagnostics.append(
+                        RecordParseDiagnostic(path, 1, str(exc), code="finding_schema")
+                    )
+                    artifact_decoded = None
+                if artifact_decoded is not None and artifact_decoded.record_type == "ArtifactVersion":
+                    data = artifact_decoded.data
+                    _apply_field_aliases(artifact_decoded.record_type, data)
                     records.append(
                         Record(
                             "ArtifactVersion",
@@ -259,6 +285,7 @@ def parse_records_with_diagnostics(path: Path) -> ParsedRecordFile:
                             path,
                             1,
                             data,
+                            finding_schema_origin=artifact_decoded.finding_schema_origin,
                         )
                     )
     return ParsedRecordFile(records=records, diagnostics=diagnostics)

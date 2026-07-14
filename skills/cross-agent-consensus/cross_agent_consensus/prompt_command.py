@@ -9,6 +9,7 @@ from cross_agent_consensus.markdown_records import frontmatter
 from cross_agent_consensus.models import CheckResult, PromptCommandInput, Record
 from cross_agent_consensus.prompts import build_prompt, prompt_target, resolve_active_round, select_review_batch
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
+from cross_agent_consensus.run_audit import locked_run_command
 from cross_agent_consensus.validation import check_links, check_pre_execution, check_records, remediation_cap_blockers
 
 
@@ -34,9 +35,9 @@ def rereview_finding_ids(
         if isinstance(source_finding_ids, list) and source_finding_ids:
             return [str(finding_id) for finding_id in source_finding_ids]
     return [
-        str(record.data.get("canonical_finding_id"))
-        for record in records_by_type(records, "CanonicalFinding")
-        if record.data.get("canonical_finding_id")
+        str(record.data.get("normalized_finding_id"))
+        for record in records_by_type(records, "NormalizedFinding")
+        if record.data.get("normalized_finding_id")
     ]
 
 
@@ -104,7 +105,7 @@ def append_remediation_cap_escalation(
             frontmatter(
                 {
                     "record_type": "EscalationRecord",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": actor or "orchestrator-consensus-tool",
                     "created_at": utc_now(),
@@ -148,6 +149,7 @@ def check_rereview_record_gate(run: Path) -> bool:
     return True
 
 
+@locked_run_command("prompt_written", writes_when=lambda args: not args.dry_run)
 def cmd_prompt(args: PromptCommandInput) -> int:
     run = Path(args.run)
     pre_execution = check_pre_execution(run)

@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from cross_agent_consensus.config import config_resolution_record
+from cross_agent_consensus.integrity import content_locator_base
 from cross_agent_consensus.io import hash_locator, read_cac_version
 from cross_agent_consensus.layout import ROUND_FIRST_LAYOUT_VERSION, round_dir
 from cross_agent_consensus.markdown_records import frontmatter
@@ -64,7 +65,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         f"- `run_id`: `{run_id}`",
         f"- `run_root`: `{run}`",
         f"- `cross_agent_consensus_version`: `{CAC_VERSION}`",
-        "- `protocol_version`: `m2-markdown-1`",
+        "- `protocol_version`: `m2-markdown-2`",
         f"- `layout_version`: `{ROUND_FIRST_LAYOUT_VERSION}`",
         f"- prompt payload root: `{first_round_rel}/prompts/`",
         f"- raw-output payload root: `{first_round_rel}/raw/`",
@@ -79,7 +80,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         frontmatter(
             {
                 "record_type": "TaskBrief",
-                "schema_version": "m2-markdown-1",
+                "schema_version": "m2-markdown-2",
                 "run_id": run_id,
                 "actor_identity": args.orchestrator,
                 "created_at": created_at,
@@ -102,7 +103,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         frontmatter(
             {
                 "record_type": "Policy",
-                "schema_version": "m2-markdown-1",
+                "schema_version": "m2-markdown-2",
                 "run_id": run_id,
                 "actor_identity": args.orchestrator,
                 "created_at": created_at,
@@ -139,7 +140,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         frontmatter(
             {
                 "record_type": "Participants",
-                "schema_version": "m2-markdown-1",
+                "schema_version": "m2-markdown-2",
                 "run_id": run_id,
                 "actor_identity": args.orchestrator,
                 "created_at": created_at,
@@ -163,7 +164,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         frontmatter(
             {
                 "record_type": "ReviewScope",
-                "schema_version": "m2-markdown-1",
+                "schema_version": "m2-markdown-2",
                 "run_id": run_id,
                 "actor_identity": args.orchestrator,
                 "created_at": created_at,
@@ -202,7 +203,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
             frontmatter(
                 {
                     "record_type": "ReviewBatch",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run_id,
                     "actor_identity": args.orchestrator,
                     "created_at": created_at,
@@ -234,7 +235,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
             frontmatter(
                 {
                     "record_type": "ArtifactVersion",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run_id,
                     "actor_identity": args.orchestrator,
                     "created_at": created_at,
@@ -242,6 +243,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
                     "predecessor_id_or_null": None,
                     "content_locator": args.artifact_locator,
                     "content_hash_or_null": hash_value,
+                    "content_locator_base_or_null": content_locator_base(args.artifact_locator, Path.cwd()),
                     "produced_by": args.author,
                 }
             ),

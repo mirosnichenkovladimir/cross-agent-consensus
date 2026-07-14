@@ -39,12 +39,12 @@ class TerminationTests(unittest.TestCase):
                     },
                 ),
                 Record(
-                    "CanonicalFinding",
-                    "canonical-finding-001",
+                    "NormalizedFinding",
+                    "normalized-finding-001",
                     Path("rounds/round-001/normalization.md"),
                     1,
                     {
-                        "canonical_finding_id": "canonical-finding-001",
+                        "normalized_finding_id": "normalized-finding-001",
                         "target_artifact_version_id": "v1",
                         "source_raw_finding_ids": ["raw-finding-001"],
                         "normalization_record_id": "normalization-001",
@@ -69,13 +69,13 @@ class TerminationTests(unittest.TestCase):
         )
 
         self.assertTrue(body.startswith("# Report\n\n## Results"))
-        self.assertIn("### canonical-finding-001: Missing terminal condition.", body)
+        self.assertIn("### normalized-finding-001: Missing terminal condition.", body)
         self.assertIn("Problem:\nMissing terminal condition.", body)
         self.assertIn("Explanation:\nA human cannot see why the run ended.", body)
         self.assertIn("Required action:\nAdd an explicit terminal condition.", body)
         self.assertIn("- raw-finding-001: README.md:1", body)
         self.assertIn("## Reviewer Stats", body)
-        self.assertIn("### codex\n\nRaw findings: 1\nCanonicalized: 1\nDiscarded: 0", body)
+        self.assertIn("### codex\n\nRaw findings: 1\nNormalized: 1\nDiscarded: 0", body)
         self.assertIn("## TerminationRecord termination-001", body)
         self.assertIn("## FinalReport final-report-001", body)
         self.assertIn("terminal_condition: consensus_reached", body)

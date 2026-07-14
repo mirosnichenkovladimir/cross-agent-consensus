@@ -29,6 +29,7 @@ class Record:
     path: Path
     heading_line: int
     data: dict[str, Any]
+    finding_schema_origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class RecordParseDiagnostic:
     path: Path
     heading_line: int
     message: str
+    code: str | None = None
 
 
 @dataclass
@@ -174,6 +176,7 @@ class InvocationCommandInput(InvocationReadyInput):
     idle_timeout_seconds: float
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
+    require_existing_approval: bool = False
 
 
 @dataclass

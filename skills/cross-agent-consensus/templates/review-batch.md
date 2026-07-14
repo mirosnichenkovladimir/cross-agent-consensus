@@ -5,7 +5,7 @@ Place this file at `rounds/round-NNN/round.md`. Do not ask reviewers to work unt
 ## ReviewBatch review-batch-round-<n>-<mode>
 ---
 record_type: ReviewBatch
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>

@@ -93,10 +93,10 @@ REQUIRED_FIELDS = {
         "scope_classification",
         "blocking_status",
         "rationale",
-        "canonical_finding_id",
+        "normalized_finding_id",
     ],
-    "CanonicalFinding": [
-        "canonical_finding_id",
+    "NormalizedFinding": [
+        "normalized_finding_id",
         "target_artifact_version_id",
         "source_raw_finding_ids",
         "normalization_record_id",
@@ -111,14 +111,14 @@ REQUIRED_FIELDS = {
     ],
     "MaterialityChallenge": [
         "materiality_challenge_id",
-        "canonical_finding_id",
+        "normalized_finding_id",
         "claimed_materiality",
         "rationale",
         "supporting_record_ids",
     ],
     "AuthorResponse": [
         "author_response_id",
-        "canonical_finding_id",
+        "normalized_finding_id",
         "response_type",
         "rationale",
         "resulting_artifact_version_id_or_null",
@@ -126,7 +126,7 @@ REQUIRED_FIELDS = {
     ],
     "ClarificationRecord": [
         "clarification_record_id",
-        "canonical_finding_id",
+        "normalized_finding_id",
         "requested_by",
         "responded_by",
         "question",
@@ -134,7 +134,7 @@ REQUIRED_FIELDS = {
     ],
     "ReReviewDecision": [
         "re_review_decision_id",
-        "canonical_finding_id",
+        "normalized_finding_id",
         "reviewer_identity",
         "decision",
         "rationale",
@@ -228,6 +228,7 @@ ENUMS = {
     },
     "terminal_condition": {"consensus_reached", "round_limit_reached", "escalated_to_human", "aborted"},
     "mechanism": {"cli_approved_flag", "policy_unattended"},
+    "capture_origin": {"live_cli", "manual_import", "host_subagent", "stdin"},
 }
 
 FIELD_ALIASES: dict[str, dict[str, str]] = {
@@ -253,7 +254,7 @@ ID_FIELDS = {
     "RawReviewerOutput": "raw_output_id",
     "RawFinding": "raw_finding_id",
     "NormalizationRecord": "normalization_record_id",
-    "CanonicalFinding": "canonical_finding_id",
+    "NormalizedFinding": "normalized_finding_id",
     "MaterialityChallenge": "materiality_challenge_id",
     "AuthorResponse": "author_response_id",
     "ClarificationRecord": "clarification_record_id",
@@ -332,4 +333,23 @@ for _field in {field for fields in REQUIRED_FIELDS.values() for field in fields}
 
 def expected_type_label(field: str) -> str:
     expected = REQUIRED_FIELD_TYPES[field]
+    return " or ".join(value.__name__ for value in expected)
+
+
+OPTIONAL_FIELD_TYPES: dict[str, tuple[type[object], ...]] = {
+    "content_locator_base_or_null": (str, NoneType),
+    "raw_payload_path": (str,),
+    "raw_payload_sha256": (str,),
+    "payload_sha256": (str,),
+    "capture_origin": (str,),
+    "session_id_or_null": (str, NoneType),
+    "session_path_or_null": (str, NoneType),
+    "prompt_sha256_or_null": (str, NoneType),
+    "approval_binding_version": (str,),
+    "approved_invocations": (list,),
+}
+
+
+def optional_type_label(field: str) -> str:
+    expected = OPTIONAL_FIELD_TYPES[field]
     return " or ".join(value.__name__ for value in expected)

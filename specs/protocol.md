@@ -29,20 +29,29 @@ Every protocol record MUST include a stable identifier, `run_id`, `actor_identit
 Minimum record types:
 
 - `ReviewScope`: `review_scope_id`, `objective`, `in_scope`, `out_of_scope`, `review_modes_allowed`, `max_fresh_review_rounds`, `max_remediation_rounds_per_finding`, and optional `promotion_policy`. The Review Scope defines what can block consensus for the run.
-- `ReviewBatch`: `review_batch_id`, `review_scope_id`, `review_mode`, `target_artifact_version_id`, and optional `source_finding_ids` and `review_focus`. Valid `review_mode` values are `fresh_review`, `remediation_verification`, `regression_check`, and `scope_triage`. `review_focus` values are prompt lenses, not participant identities. A conclusion-validation batch uses `review_mode=scope_triage`, `batch_purpose=conclusion_validation`, `source_finding_ids` that reference Canonical Findings, and `expected_reviewer_identities` naming the recalled reviewers.
-- `ArtifactVersion`: `artifact_version_id`, `predecessor_id_or_null`, `content_locator`, and `content_hash_or_null`. The `artifact_version_id` MUST be unique within the run and stable once recorded.
+- `ReviewBatch`: `review_batch_id`, `review_scope_id`, `review_mode`, `target_artifact_version_id`, and optional `source_finding_ids` and `review_focus`. Valid `review_mode` values are `fresh_review`, `remediation_verification`, `regression_check`, and `scope_triage`. `review_focus` values are prompt lenses, not participant identities. A conclusion-validation batch uses `review_mode=scope_triage`, `batch_purpose=conclusion_validation`, `source_finding_ids` that reference Normalized Findings, and `expected_reviewer_identities` naming the recalled reviewers.
+- `ArtifactVersion`: `artifact_version_id`, `predecessor_id_or_null`, `content_locator`, and `content_hash_or_null`, plus optional `content_locator_base_or_null` for resolving a relative local path. The `artifact_version_id` MUST be unique within the run and stable once recorded.
+- `RawReviewerOutput`: `raw_output_id`, `reviewer_identity`, `review_batch_id`, `artifact_version_id`, `raw_finding_ids`, and `is_first_round_independent`. Implementations that copy a payload SHOULD also record `raw_payload_path`, `raw_payload_sha256`, `capture_origin`, `session_id_or_null`, `session_path_or_null`, `prompt_sha256_or_null`, and `session_exit_sha256_or_null`.
 - `RawFinding`: `raw_finding_id`, `reviewer_identity`, `artifact_version_id`, `review_batch_id`, `location`, `claim`, `evidence`, `severity_or_materiality_claim`, `scope_classification`, `blocking_status`, and optional `suggested_fix`. Valid `scope_classification` values are `in_scope`, `out_of_scope`, and `unclear_scope`. Valid `blocking_status` values are `blocking`, `non_blocking`, `deferred`, and `promoted_by_human`.
-- `NormalizationRecord`: `normalization_record_id`, `source_raw_finding_ids`, `normalizer_identity`, `classifier_identity`, `materiality`, `scope_classification`, `blocking_status`, `rationale`, and `created_at`.
-- `MaterialityChallenge`: `materiality_challenge_id`, `canonical_finding_id`, `claimed_materiality`, `rationale`, and optional `supporting_record_ids`.
-- `CanonicalFinding`: `canonical_finding_id`, `target_artifact_version_id`, `source_raw_finding_ids`, `normalization_record_id`, `materiality`, `materiality_status`, `scope_classification`, `blocking_status`, `lifecycle_state`, `claim`, `rationale_or_summary`, and `clarification_pending`. Valid `materiality_status` values are `undisputed`, `disputed_materiality`, and `resolved_after_dispute`. Findings are created with `undisputed`. A materiality dispute sets `materiality_status=disputed_materiality`. Resolution by policy, Human Decision, or an aggregated resolving Re-Review Decision sets `materiality_status=resolved_after_dispute` and MUST be traceable to the resolving policy, Human Decision, or Re-Review Decision record. `clarification_pending` defaults to `false`.
-- `AuthorResponse`: `author_response_id`, `canonical_finding_id`, `response_type`, `rationale`, `resulting_artifact_version_id_or_null`, and optional `clarification_request`.
-- `ClarificationRecord`: `clarification_record_id`, `canonical_finding_id`, `requested_by`, `responded_by`, `question`, `answer_or_reason_unavailable`, and `created_at`.
-- `ReReviewDecision`: `re_review_decision_id`, `canonical_finding_id`, `reviewer_identity`, `decision`, `rationale`, and `artifact_version_id_or_null`.
-- `ValidationEvidence`: `validation_evidence_id`, `validator_id`, `target_artifact_version_id`, `result`, `payload_reference`, `produced_by`, and optional `waiver_authority` and `waiver_rationale`.
+- `NormalizationRecord`: `normalization_record_id`, `source_raw_finding_ids`, `normalizer_identity`, `classifier_identity`, `materiality`, `scope_classification`, `blocking_status`, `rationale`, `normalized_finding_id`, and `created_at`.
+- `MaterialityChallenge`: `materiality_challenge_id`, `normalized_finding_id`, `claimed_materiality`, `rationale`, and optional `supporting_record_ids`.
+- `NormalizedFinding`: `normalized_finding_id`, `target_artifact_version_id`, `source_raw_finding_ids`, `normalization_record_id`, `materiality`, `materiality_status`, `scope_classification`, `blocking_status`, `lifecycle_state`, `claim`, `rationale_or_summary`, and `clarification_pending`. Valid `materiality_status` values are `undisputed`, `disputed_materiality`, and `resolved_after_dispute`. Findings are created with `undisputed`. A materiality dispute sets `materiality_status=disputed_materiality`. Resolution by policy, Human Decision, or an aggregated resolving Re-Review Decision sets `materiality_status=resolved_after_dispute` and MUST be traceable to the resolving policy, Human Decision, or Re-Review Decision record. `clarification_pending` defaults to `false`.
+- `AuthorResponse`: `author_response_id`, `normalized_finding_id`, `response_type`, `rationale`, `resulting_artifact_version_id_or_null`, and optional `clarification_request`.
+- `ClarificationRecord`: `clarification_record_id`, `normalized_finding_id`, `requested_by`, `responded_by`, `question`, `answer_or_reason_unavailable`, and `created_at`.
+- `ReReviewDecision`: `re_review_decision_id`, `normalized_finding_id`, `reviewer_identity`, `decision`, `rationale`, and `artifact_version_id_or_null`.
+- `ValidationEvidence`: `validation_evidence_id`, `validator_id`, `target_artifact_version_id`, `result`, `payload_reference`, `produced_by`, and optional `waiver_authority` and `waiver_rationale`. Implementations that copy a payload SHOULD also record `payload_sha256`, `capture_origin`, `session_id_or_null`, `session_path_or_null`, `prompt_sha256_or_null`, and `session_exit_sha256_or_null`.
+- `OperatorApproval`: `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, and `operator_identity_or_null`. An exact-input approval adds `approval_binding_version=exact-inputs-1` and one `approved_invocations` mapping per actor with prompt, command, and target ArtifactVersion digests.
 - `EscalationRecord`: `escalation_record_id`, `affected_finding_ids`, `reason`, `requested_authority`, and `created_at`.
 - `HumanDecision`: `human_decision_id`, `affected_finding_ids_or_validator_ids`, `decision_type`, `rationale`, `binding_authority`, `requires_new_artifact_version`, and `created_at`. Valid `decision_type` values are `mark_resolved`, `accept_author_rejection`, `require_revision`, `mark_non_material`, `dispute_materiality`, `waive_validator`, `terminate_escalated_to_human`, and `abort_run`. For run-scoped `terminate_escalated_to_human` and `abort_run` decisions, `affected_finding_ids_or_validator_ids` MUST be `["__run_scope__"]`. Finding lifecycle state effects are defined in section 7.
 - `AbortRecord`: `abort_record_id`, `trigger_actor`, `reason`, `artifact_version_id_or_null`, `unresolved_finding_ids`, and `created_at`.
 - `TerminationRecord`: `termination_record_id`, `terminal_condition`, `reason`, `final_artifact_version_id_or_null`, `unresolved_finding_ids`, and references to supporting records.
+
+Current records use schema `m2-markdown-2`, `NormalizedFinding`, and
+`normalized_finding_id`. A reader MAY load the historical finding record and
+identifier field from `m2-markdown-1` only by converting them directly to the
+current model while preserving identifier values. Historical names are invalid
+under `m2-markdown-2`; current names are invalid under `m2-markdown-1`; one run
+MUST NOT mix the two finding contracts.
 
 Validators are profile-defined or policy-defined. The base protocol does not require any validator unless the Task Brief, Policy, or implementation profile declares one required. Validation Evidence results are first-class protocol records. Valid `ValidationEvidence.result` values are `pass`, `fail`, `error`, and `waived`. A `waived` result MUST identify the policy or human authority that granted the waiver.
 
@@ -53,8 +62,8 @@ Validators are profile-defined or policy-defined. The base protocol does not req
 3. First-round Reviewer Agents MUST NOT see other reviewers' findings before producing their own Raw Findings.
 4. Raw Findings MUST be preserved as immutable audit records.
 5. Every Raw Finding MUST bind to exactly one Artifact Version.
-6. Canonical Findings MAY aggregate multiple Raw Findings but MUST preserve links to them.
-7. Every in-scope blocking material Canonical Finding MUST receive an explicit Author Response.
+6. Normalized Findings MAY aggregate multiple Raw Findings but MUST preserve links to them.
+7. Every in-scope blocking material Normalized Finding MUST receive an explicit Author Response.
 8. A rejected finding MUST include reasoning.
 9. Reviewer comments MUST be treated as claims, not commands.
 10. Reviewers in the base protocol MUST NOT directly modify the artifact.
@@ -64,9 +73,12 @@ Validators are profile-defined or policy-defined. The base protocol does not req
 14. Validation Evidence has higher authority than unsupported model opinion.
 15. Consensus MUST NOT be declared while unresolved material findings remain.
 16. Human decisions are binding unless an implementation profile defines another governance model.
-17. When a conclusion-validation batch is scheduled, Author Response for the referenced Canonical Findings MUST wait until validation outputs are captured from every `expected_reviewer_identities` participant, or Policy explicitly records the batch id in `skipped_conclusion_validation_batch_ids`.
+17. When a conclusion-validation batch is scheduled, Author Response for the referenced Normalized Findings MUST wait until validation outputs are captured from every `expected_reviewer_identities` participant, or Policy explicitly records the batch id in `skipped_conclusion_validation_batch_ids`.
 18. Reviewer identity MUST come from Participants. Review focus/lens values MUST NOT be used as reviewer identities.
 19. If ConfigResolution records `reviewer_clis.<reviewer>.command`, RawReviewerOutput from that reviewer MUST be backed by a completed `invoke-agent` session before terminal consensus or round-limit closure.
+20. An implementation that records an ArtifactVersion content digest MUST recompute it before actor invocation and terminal output; a mismatch blocks both actions.
+21. An external CLI approval MUST bind the exact prompt, runtime argv, and working directory. If the target ArtifactVersion is a readable local file, the approval MUST also bind its content digest.
+22. `capture_origin=live_cli` evidence MUST reference the completed invocation session whose prompt, command, and payload produced that evidence.
 
 ## 6. Round model
 
@@ -125,29 +137,29 @@ Reviewers produce Raw Findings. Each Raw Finding MUST classify whether it is in 
 
 ### 6.5 Normalization phase
 
-The Orchestrator converts Raw Findings into Canonical Findings.
+The Orchestrator converts Raw Findings into Normalized Findings.
 
 Normalization MAY merge duplicates, split compound findings, classify materiality, classify scope, assign blocking status, and assign lifecycle state.
 
 Normalization MUST NOT delete or rewrite Raw Findings.
 
-Each Canonical Finding MUST reference a Normalization Record. The Normalization Record MUST preserve the source Raw Finding identifiers, materiality classification, scope classification, blocking status, classifier identity, and rationale.
+Each Normalized Finding MUST reference a Normalization Record. The Normalization Record MUST preserve the source Raw Finding identifiers, materiality classification, scope classification, blocking status, classifier identity, and rationale.
 
-A `MaterialityChallenge` MAY be created during the Normalization phase after the relevant Canonical Finding exists, during the Author Response phase, or during the Re-Review phase. It MUST NOT be created after the Termination phase begins. Any Reviewer Agent participating in the run MAY challenge a Canonical Finding's materiality classification by creating a `MaterialityChallenge`. The Orchestrator MAY also create a `MaterialityChallenge` when it detects an internal contradiction or unsupported materiality classification. A Human Decision MAY set, dispute, or resolve a finding's materiality. If a `MaterialityChallenge` disputes a classification, or a Human Decision marks materiality as disputed, the Canonical Finding's `materiality_status` MUST become `disputed_materiality`. A finding with `disputed_materiality` MUST be treated as material and MUST NOT transition to `closed_non_material` until resolved by policy or Human Decision.
+A `MaterialityChallenge` MAY be created during the Normalization phase after the relevant Normalized Finding exists, during the Author Response phase, or during the Re-Review phase. It MUST NOT be created after the Termination phase begins. Any Reviewer Agent participating in the run MAY challenge a Normalized Finding's materiality classification by creating a `MaterialityChallenge`. The Orchestrator MAY also create a `MaterialityChallenge` when it detects an internal contradiction or unsupported materiality classification. A Human Decision MAY set, dispute, or resolve a finding's materiality. If a `MaterialityChallenge` disputes a classification, or a Human Decision marks materiality as disputed, the Normalized Finding's `materiality_status` MUST become `disputed_materiality`. A finding with `disputed_materiality` MUST be treated as material and MUST NOT transition to `closed_non_material` until resolved by policy or Human Decision.
 
 ### 6.5.1 Conclusion validation
 
-After Raw Findings are sealed and normalized, the Orchestrator MAY schedule a conclusion-validation batch before Author Response. This batch uses `review_mode=scope_triage`, sets `batch_purpose=conclusion_validation`, sets `source_finding_ids` to the Canonical Finding ids in the normalized superset, records `expected_reviewer_identities`, and gives reviewers the proposed conclusion table.
+After Raw Findings are sealed and normalized, the Orchestrator MAY schedule a conclusion-validation batch before Author Response. This batch uses `review_mode=scope_triage`, sets `batch_purpose=conclusion_validation`, sets `source_finding_ids` to the Normalized Finding ids in the normalized superset, records `expected_reviewer_identities`, and gives reviewers the proposed conclusion table.
 
 Allowed proposed conclusions are `valid_blocker`, `duplicate`, `non_material`, `out_of_scope`, `false_positive`, `deferred`, `needs_human`, and `unclear`. The Orchestrator SHOULD preserve the rationale and source Raw Finding ids used for each proposed conclusion.
 
-Reviewer validation output is not a fresh review. For each referenced Canonical Finding, a reviewer may record `agree`, `disagree`, or `needs_human`. Every reviewer decision MUST include rationale or argumentation and SHOULD include evidence references to Canonical Finding fields or source Raw Finding ids. A disagreement MUST name the corrected conclusion. A `needs_human` decision MUST explain the ambiguity, policy question, or evidence gap that requires human authority. Raw validation outputs MUST be captured before the Orchestrator changes any conclusion based on them.
+Reviewer validation output is not a fresh review. For each referenced Normalized Finding, a reviewer may record `agree`, `disagree`, or `needs_human`. Every reviewer decision MUST include rationale or argumentation and SHOULD include evidence references to Normalized Finding fields or source Raw Finding ids. A disagreement MUST name the corrected conclusion. A `needs_human` decision MUST explain the ambiguity, policy question, or evidence gap that requires human authority. Raw validation outputs MUST be captured before the Orchestrator changes any conclusion based on them.
 
 If all participating reviewers agree, the proposed conclusion is confirmed. If any reviewer marks `needs_human`, the finding becomes human-facing under the run's escalation policy. If reviewers disagree, the Orchestrator either records an updated NormalizationRecord or MaterialityChallenge and asks only for targeted validation, or records the disagreement for Human Supervisor resolution.
 
 ### 6.6 Author response phase
 
-The Author Agent responds to every material Canonical Finding whose `scope_classification=in_scope` and whose `blocking_status` is `blocking` or `promoted_by_human`. Profiles MAY require responses for non-blocking or out-of-scope findings, but those findings do not block consensus by default.
+The Author Agent responds to every material Normalized Finding whose `scope_classification=in_scope` and whose `blocking_status` is `blocking` or `promoted_by_human`. Profiles MAY require responses for non-blocking or out-of-scope findings, but those findings do not block consensus by default.
 
 Valid response types:
 
@@ -160,19 +172,19 @@ If the Author revises the artifact, the revision MUST become a new Artifact Vers
 
 A `request_clarification` response opens a clarification sub-loop. The Orchestrator routes the request to the source Reviewer or other policy-defined authority and records a Clarification Record. The finding remains `open` with `clarification_pending=true`; this sub-loop does not consume a new round unless a profile explicitly says otherwise. The base protocol does not define a wall-clock response deadline. Profiles MAY define a deadline, after which the Orchestrator MUST either escalate or record why the run can continue. After clarification is answered or declared unavailable, the Author MUST provide a non-clarification Author Response before normal re-review proceeds.
 
-Non-material Canonical Findings are recorded for audit as `closed_non_material` on creation and remain `closed_non_material` unless materiality is disputed. The Author MAY respond to them or revise the artifact in response, but that response or revision does not change their lifecycle state unless materiality is disputed. Non-material, non-blocking, deferred, and out-of-scope findings do not block consensus and do not require re-review unless a profile requires it or a Human Decision promotes them.
+Non-material Normalized Findings are recorded for audit as `closed_non_material` on creation and remain `closed_non_material` unless materiality is disputed. The Author MAY respond to them or revise the artifact in response, but that response or revision does not change their lifecycle state unless materiality is disputed. Non-material, non-blocking, deferred, and out-of-scope findings do not block consensus and do not require re-review unless a profile requires it or a Human Decision promotes them.
 
 ### 6.7 Re-review phase
 
 Reviewer Agents inspect:
 
-- original Canonical Finding;
+- original Normalized Finding;
 - linked Raw Findings;
 - Author Response;
 - revised Artifact Version if any;
 - relevant Validation Evidence.
 
-In re-review, a Reviewer MAY see linked Raw Findings from other reviewers because those links are part of the Canonical Finding. A Reviewer MUST NOT see other reviewers' Re-Review Decisions for the same re-review batch before producing its own decision, unless a profile explicitly disables independent re-review. In `remediation_verification`, the Reviewer MUST limit evaluation to the referenced findings, their Author Responses, and direct regressions introduced by the remediation. Unrelated observations MUST be emitted only as out-of-scope suggestions or omitted.
+In re-review, a Reviewer MAY see linked Raw Findings from other reviewers because those links are part of the Normalized Finding. A Reviewer MUST NOT see other reviewers' Re-Review Decisions for the same re-review batch before producing its own decision, unless a profile explicitly disables independent re-review. In `remediation_verification`, the Reviewer MUST limit evaluation to the referenced findings, their Author Responses, and direct regressions introduced by the remediation. Unrelated observations MUST be emitted only as out-of-scope suggestions or omitted.
 
 Valid Re-Review Decisions:
 
@@ -206,7 +218,7 @@ If no terminal condition applies and the round limit is not reached, the Orchest
 
 ## 7. Finding lifecycle
 
-Canonical Finding states:
+Normalized Finding states:
 
 - open;
 - accepted;
@@ -236,8 +248,8 @@ Default lifecycle transitions:
 
 | Event | Prior state | Next state | Notes |
 | --- | --- | --- | --- |
-| Canonical Finding created as material | none | `open` | Includes findings with `disputed_materiality`. |
-| Canonical Finding created as non-material | none | `closed_non_material` | Reopens to `open` if materiality is disputed. |
+| Normalized Finding created as material | none | `open` | Includes findings with `disputed_materiality`. |
+| Normalized Finding created as non-material | none | `closed_non_material` | Reopens to `open` if materiality is disputed. |
 | `MaterialityChallenge` disputes a non-material classification | `closed_non_material` | `open` | Sets `materiality_status=disputed_materiality`; Author Response is required. |
 | `MaterialityChallenge` disputes another materiality classification | any state | unchanged | Sets `materiality_status=disputed_materiality`; the finding is treated as material until policy or Human Decision resolves the classification. |
 | Author Response `accept` or `partially_accept` without a resolving Artifact Version | `open`, `still_valid`, `disputed` | `accepted` | Still unresolved. |
@@ -260,7 +272,7 @@ Default lifecycle transitions:
 
 A reviewer MAY record `verified` against an `accepted` finding when no artifact change was required, such as when the finding is resolved by clarification or by an Author Response that satisfies the claim without revision.
 
-When multiple reviewers re-review the same material Canonical Finding in the same batch, the Orchestrator MUST aggregate decisions as follows. The rules are evaluated in order; the first matching rule determines the next state.
+When multiple reviewers re-review the same material Normalized Finding in the same batch, the Orchestrator MUST aggregate decisions as follows. The rules are evaluated in order; the first matching rule determines the next state.
 
 1. If any reviewer records `needs_human`, the next state is `escalated`.
 2. If all reviewers record the same resolving decision, the next state is that decision's mapped lifecycle state.
@@ -285,7 +297,7 @@ Default consensus requires:
 4. no participant has an active `needs_human` decision for an in-scope blocking finding;
 5. no in-scope blocking material finding remains `disputed` or `escalated`;
 6. the round limit has not been exceeded, with consensus checked before the round-limit stop after the final allowed round;
-7. the final report lists Canonical Findings by lifecycle state and separately lists non-blocking, deferred, and out-of-scope suggestions.
+7. the final report lists Normalized Findings by lifecycle state and separately lists non-blocking, deferred, and out-of-scope suggestions.
 
 Profiles MAY define stricter consensus predicates. Profiles MAY NOT make out-of-scope findings block consensus without a recorded Human Decision, policy rule, or scope promotion record.
 

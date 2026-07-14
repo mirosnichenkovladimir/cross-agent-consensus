@@ -15,6 +15,8 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] `rounds/round-001/round.md` contains a ReviewBatch section with `review_mode`.
 - [ ] Any review focus/lens values are recorded as ReviewBatch `review_focus`, not as reviewer identities.
 - [ ] `artifacts/v1.md` or the selected initial ArtifactVersion exists.
+- [ ] A readable local ArtifactVersion has `content_hash_or_null`; a relative locator also records `content_locator_base_or_null`.
+- [ ] Root `events.jsonl` contains the hash-chained `run_initialized` event; `.cac-events-anchor.json` matches its count, tail digest, and file digest; its phase is derived from records, not edited into the journal.
 - [ ] `document-consensus` defaults are confirmed or overridden before reviewer work starts.
 
 ## Reviewer Isolation
@@ -25,30 +27,32 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] First-round reviewers did not receive other reviewers' findings before Raw Findings were emitted.
 - [ ] Every review file is scoped to one round and one reviewer: `rounds/round-NNN/reviews/<reviewer_identity>.md`.
 - [ ] If ConfigResolution lists `reviewer_clis.<reviewer>.command`, that reviewer's output came through `scripts/consensus invoke-agent` and has a completed `rounds/round-NNN/agents/<reviewer>/session-*` session.
+- [ ] OperatorApproval binds each launched actor's exact prompt, argv, and readable local ArtifactVersion digest.
 
-## Raw And Canonical Findings
+## Raw And Normalized Findings
 
 - [ ] Raw reviewer output is retained in a clearly delimited fenced block and is not edited after first capture.
+- [ ] CLI-captured RawReviewerOutput records `raw_payload_path`, `raw_payload_sha256`, and `capture_origin`; `live_cli` also records the exact session path, prompt digest, and `exit.json` digest whose session evidence hashes match the captured bytes.
 - [ ] If raw output first appeared in host logs, terminal scrollback, or `/tmp`, it was copied into `runs/<run_id>/` before normalization.
 - [ ] Every RawFinding section has its own YAML frontmatter block.
 - [ ] Every RawFinding binds to exactly one ArtifactVersion through `artifact_version_id`.
 - [ ] Every RawFinding records `review_batch_id`, `location`, `claim`, `evidence`, `severity_or_materiality_claim`, `scope_classification`, and `blocking_status`.
 - [ ] NormalizationRecord sections preserve all source RawFinding ids.
-- [ ] CanonicalFinding sections preserve RawFinding links and the NormalizationRecord id.
-- [ ] MaterialityChallenge sections, when present, are attached to the relevant CanonicalFinding and recorded before termination begins.
+- [ ] NormalizedFinding sections preserve RawFinding links and the NormalizationRecord id.
+- [ ] MaterialityChallenge sections, when present, are attached to the relevant NormalizedFinding and recorded before termination begins.
 
 ## Conclusion Validation
 
-- [ ] If a conclusion-validation pass is needed, `rounds/round-NNN/round.md` contains a `scope_triage` ReviewBatch with `batch_purpose=conclusion_validation`, `source_finding_ids` naming Canonical Findings, and `expected_reviewer_identities`.
+- [ ] If a conclusion-validation pass is needed, `rounds/round-NNN/round.md` contains a `scope_triage` ReviewBatch with `batch_purpose=conclusion_validation`, `source_finding_ids` naming Normalized Findings, and `expected_reviewer_identities`.
 - [ ] Recalled reviewer prompts state that conclusion validation is not a fresh review.
-- [ ] Each recalled reviewer answers only `agree`, `disagree`, or `needs_human` for each listed CanonicalFinding.
+- [ ] Each recalled reviewer answers only `agree`, `disagree`, or `needs_human` for each listed NormalizedFinding.
 - [ ] Every recalled reviewer decision includes rationale or argumentation and evidence references.
 - [ ] `disagree` decisions include a corrected conclusion; `needs_human` decisions include the reason human authority is needed.
-- [ ] AuthorResponse sections for referenced CanonicalFindings wait until every expected conclusion-validation reviewer output is captured or Policy explicitly skips the batch with `skipped_conclusion_validation_batch_ids`.
+- [ ] AuthorResponse sections for referenced NormalizedFindings wait until every expected conclusion-validation reviewer output is captured or Policy explicitly skips the batch with `skipped_conclusion_validation_batch_ids`.
 
 ## Author Response And Revision
 
-- [ ] Every in-scope blocking material CanonicalFinding has an AuthorResponse.
+- [ ] Every in-scope blocking material NormalizedFinding has an AuthorResponse.
 - [ ] AuthorResponse `response_type` is one of `accept`, `reject`, `partially_accept`, or `request_clarification`.
 - [ ] Rejections and partial acceptances include rationale.
 - [ ] No reviewer suggestion is silently applied without an AuthorResponse.
@@ -57,7 +61,7 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 
 ## Re-Review And Aggregation
 
-- [ ] ReReviewDecision sections reference the CanonicalFinding, reviewer identity, artifact version if applicable, and ReviewBatch.
+- [ ] ReReviewDecision sections reference the NormalizedFinding, reviewer identity, artifact version if applicable, and ReviewBatch.
 - [ ] Re-review decisions use only `verified`, `rejection_accepted`, `still_valid`, `disputed`, or `needs_human`.
 - [ ] In `remediation_verification`, reviewers evaluated only linked findings, Author Responses, direct revisions, relevant ValidationEvidence, and direct regressions.
 - [ ] Aggregation preserves unresolved `still_valid`, `disputed`, and `needs_human` outcomes.
@@ -78,6 +82,7 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] Failed or error validators block consensus unless a waiver is recorded.
 - [ ] Waived validators include `waiver_authority_or_null` and `waiver_rationale_or_null`.
 - [ ] Bulky evidence is stored under the active round's `raw/` directory and referenced from `payload_reference`.
+- [ ] `scripts/consensus validate --integrity` passes after evidence capture and immediately before termination.
 
 ## Configuration
 
@@ -97,9 +102,9 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 
 ## Terminal Outcome
 
-- [ ] `report.md` starts with human-readable result blocks for each CanonicalFinding.
+- [ ] `report.md` starts with human-readable result blocks for each NormalizedFinding.
 - [ ] Each result block separates `Problem`, `Explanation`, and `Required action`.
-- [ ] `report.md` includes reviewer statistics showing what each reviewer found, what was canonicalized, what was discarded, and what was independently agreed.
+- [ ] `report.md` includes reviewer statistics showing what each reviewer found, what was normalized, what was discarded, and what was independently agreed.
 - [ ] `report.md` contains both TerminationRecord and FinalReport sections after the human-readable report sections.
 - [ ] TerminationRecord and FinalReport agree on `terminal_condition`.
 - [ ] FinalReport lists validator status, unresolved blockers, and non-blocking/deferred/out-of-scope backlog separately.
@@ -107,7 +112,7 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] Consensus is not declared unless required validators pass or are waived.
 - [ ] `escalated_to_human` termination reports pending or failed validators without requiring them to pass or be waived.
 - [ ] FinalReport distinguishes failed agent sessions from completed reviewer decisions.
-- [ ] Terminal output reports the run folder, terminal condition, termination record id, final artifact, validator summary, FinalReport anchor, unresolved CanonicalFinding ids, and backlog location.
+- [ ] Terminal output reports the run folder, terminal condition, termination record id, final artifact, validator summary, FinalReport anchor, unresolved NormalizedFinding ids, and backlog location.
 
 ## Document-Consensus Defaults
 
@@ -145,7 +150,7 @@ Default in-scope dimensions when confirmed by the user:
 
 Orchestrator owns run state, record creation, reviewer isolation, raw-output preservation, finding normalization, validation evidence collection, terminal-condition evaluation, and terminal records.
 
-Author owns artifact creation or revision and explicit responses to CanonicalFindings. The Author may accept, reject, partially accept, or request clarification, but must not silently apply reviewer suggestions.
+Author owns artifact creation or revision and explicit responses to NormalizedFindings. The Author may accept, reject, partially accept, or request clarification, but must not silently apply reviewer suggestions.
 
 Reviewer owns independent review claims, evidence, scope classification, blocking status, and re-review decisions. Reviewers do not directly modify artifacts.
 
@@ -157,7 +162,7 @@ Human Supervisor owns binding human judgment, validator waivers, materiality res
 | --- | --- | --- |
 | Initialization completeness | Protocol sections 4, 6.1, 10 | UC1 |
 | First-round reviewer isolation | Protocol section 5 invariant 3, 6.4 | UC1 |
-| Raw and canonical finding audit trail | Protocol sections 4, 5, 6.5, 10 | UC2, UC6 |
+| Raw and normalized finding audit trail | Protocol sections 4, 5, 6.5, 10 | UC2, UC6 |
 | Author response and revision discipline | Protocol sections 5, 6.6, 7 | UC2, UC3, UC5 |
 | Re-review and aggregation | Protocol sections 6.7, 7 | UC2, UC3, UC4, UC9 |
 | Scope and materiality handling | Protocol sections 6.2, 6.5, 8 | UC6, UC7 |

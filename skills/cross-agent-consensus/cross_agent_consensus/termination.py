@@ -108,7 +108,7 @@ def level_summary(record: Record, raw_records: list[Record]) -> str:
 
 def finding_result(record: Record, unresolved: set[str]) -> str:
     data = record.data
-    finding_id = str(data.get("canonical_finding_id"))
+    finding_id = str(data.get("normalized_finding_id"))
     if finding_id in unresolved:
         return "unresolved"
     lifecycle = str(data.get("lifecycle_state") or "")
@@ -136,14 +136,14 @@ def result_blocks(records: list[Record], unresolved: list[str]) -> list[str]:
     raw_by_id = raw_finding_index(records)
     unresolved_set = set(unresolved)
     lines: list[str] = []
-    canonical = records_by_type(records, "CanonicalFinding")
-    if not canonical:
-        return ["No canonical findings recorded."]
-    for record in canonical:
+    normalized = records_by_type(records, "NormalizedFinding")
+    if not normalized:
+        return ["No normalized findings recorded."]
+    for record in normalized:
         data = record.data
         raw_records = raw_records_for_finding(record, raw_by_id)
         reviewers = reviewers_for_finding(record, raw_by_id)
-        finding_id = field_value(data.get("canonical_finding_id"), empty="unknown")
+        finding_id = field_value(data.get("normalized_finding_id"), empty="unknown")
         lines.extend(
             [
                 f"### {finding_id}: {field_value(data.get('claim'), empty='Untitled finding')}",
@@ -173,31 +173,31 @@ def result_blocks(records: list[Record], unresolved: list[str]) -> list[str]:
 def reviewer_stat_blocks(records: list[Record]) -> list[str]:
     raw_by_id = raw_finding_index(records)
     used_raw_ids = {
-        raw_id for record in records_by_type(records, "CanonicalFinding") for raw_id in source_raw_ids(record)
+        raw_id for record in records_by_type(records, "NormalizedFinding") for raw_id in source_raw_ids(record)
     }
     raw_by_reviewer: dict[str, list[Record]] = defaultdict(list)
     for raw in raw_by_id.values():
         reviewer = str(raw.data.get("reviewer_identity") or "unknown")
         raw_by_reviewer[reviewer].append(raw)
 
-    canonical_by_reviewer: dict[str, set[str]] = defaultdict(set)
+    normalized_by_reviewer: dict[str, set[str]] = defaultdict(set)
     agreed_by_reviewer: dict[str, set[str]] = defaultdict(set)
-    for record in records_by_type(records, "CanonicalFinding"):
-        finding_id = str(record.data.get("canonical_finding_id"))
+    for record in records_by_type(records, "NormalizedFinding"):
+        finding_id = str(record.data.get("normalized_finding_id"))
         reviewers = reviewers_for_finding(record, raw_by_id)
         for reviewer in reviewers:
-            canonical_by_reviewer[reviewer].add(finding_id)
+            normalized_by_reviewer[reviewer].add(finding_id)
             if len(reviewers) > 1:
                 agreed_by_reviewer[reviewer].add(finding_id)
 
-    reviewers = sorted(set(raw_by_reviewer) | set(canonical_by_reviewer))
+    reviewers = sorted(set(raw_by_reviewer) | set(normalized_by_reviewer))
     if not reviewers:
         return ["No reviewer findings recorded."]
     lines: list[str] = []
     for reviewer in reviewers:
         raw_records = raw_by_reviewer.get(reviewer, [])
         raw_ids = [str(raw.data.get("raw_finding_id")) for raw in raw_records if raw.data.get("raw_finding_id")]
-        canonicalized = [raw_id for raw_id in raw_ids if raw_id in used_raw_ids]
+        normalized = [raw_id for raw_id in raw_ids if raw_id in used_raw_ids]
         discarded = [raw_id for raw_id in raw_ids if raw_id not in used_raw_ids]
         blocking = sum(1 for raw in raw_records if raw.data.get("blocking_status") in {"blocking", "promoted_by_human"})
         non_blocking = sum(1 for raw in raw_records if raw.data.get("blocking_status") in {"non_blocking", "deferred"})
@@ -206,12 +206,12 @@ def reviewer_stat_blocks(records: list[Record]) -> list[str]:
                 f"### {reviewer}",
                 "",
                 f"Raw findings: {len(raw_ids)}",
-                f"Canonicalized: {len(canonicalized)}",
+                f"Normalized: {len(normalized)}",
                 f"Discarded: {len(discarded)}",
                 f"Blocking: {blocking}",
                 f"Non-blocking: {non_blocking}",
-                "Canonical findings: "
-                + (", ".join(sorted(canonical_by_reviewer.get(reviewer, set()))) or "none"),
+                "Normalized findings: "
+                + (", ".join(sorted(normalized_by_reviewer.get(reviewer, set()))) or "none"),
                 "Agreed with another reviewer: "
                 + (", ".join(sorted(agreed_by_reviewer.get(reviewer, set()))) or "none"),
                 "",
@@ -223,13 +223,13 @@ def reviewer_stat_blocks(records: list[Record]) -> list[str]:
 def reviewer_agreement_blocks(records: list[Record]) -> list[str]:
     raw_by_id = raw_finding_index(records)
     lines: list[str] = []
-    for record in records_by_type(records, "CanonicalFinding"):
+    for record in records_by_type(records, "NormalizedFinding"):
         reviewers = reviewers_for_finding(record, raw_by_id)
         if len(reviewers) <= 1:
             continue
         lines.extend(
             [
-                f"### {field_value(record.data.get('canonical_finding_id'), empty='unknown')}",
+                f"### {field_value(record.data.get('normalized_finding_id'), empty='unknown')}",
                 "",
                 f"Reviewers: {', '.join(reviewers)}",
                 f"Source raw findings: {', '.join(source_raw_ids(record)) or 'none'}",
@@ -243,7 +243,7 @@ def reviewer_agreement_blocks(records: list[Record]) -> list[str]:
 def discarded_finding_blocks(records: list[Record]) -> list[str]:
     raw_by_id = raw_finding_index(records)
     used_raw_ids = {
-        raw_id for record in records_by_type(records, "CanonicalFinding") for raw_id in source_raw_ids(record)
+        raw_id for record in records_by_type(records, "NormalizedFinding") for raw_id in source_raw_ids(record)
     }
     discarded = [raw for raw_id, raw in sorted(raw_by_id.items()) if raw_id not in used_raw_ids]
     if not discarded:
@@ -258,7 +258,7 @@ def discarded_finding_blocks(records: list[Record]) -> list[str]:
                 "",
                 f"Reviewer: {field_value(data.get('reviewer_identity'), empty='unknown')}",
                 f"Level: {field_value(data.get('severity_or_materiality_claim') or data.get('blocking_status'))}",
-                "Reason: not referenced by any CanonicalFinding",
+                "Reason: not referenced by any NormalizedFinding",
                 "",
             ]
         )
@@ -298,7 +298,7 @@ def terminal_body(
             f"- terminal condition: `{terminal_condition}`",
             f"- reason: {reason}",
             f"- final artifact version: `{final_artifact}`",
-            f"- unresolved CanonicalFinding ids: `{unresolved if unresolved else []}`",
+            f"- unresolved NormalizedFinding ids: `{unresolved if unresolved else []}`",
             f"- validators: `{status}`",
             f"- agent session states: {format_agent_session_state_counts(session_counts)}",
             "",
@@ -332,14 +332,14 @@ def terminal_body(
             f"- final artifact path or null: `{final_artifact}`",
             f"- validator status summary and evidence paths: `{status}`",
             f"- FinalReport section path or anchor: `{REPORT_FILENAME}#finalreport-final-report-001`",
-            f"- unresolved CanonicalFinding ids: `{unresolved}`",
+            f"- unresolved NormalizedFinding ids: `{unresolved}`",
             "- backlog location: `backlog.md`",
             "",
             f"## TerminationRecord {termination_id}",
             frontmatter(
                 {
                     "record_type": "TerminationRecord",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": "orchestrator-consensus-tool",
                     "created_at": created_at,
@@ -362,7 +362,7 @@ def terminal_body(
             frontmatter(
                 {
                     "record_type": "FinalReport",
-                    "schema_version": "m2-markdown-1",
+                    "schema_version": "m2-markdown-2",
                     "run_id": run.name,
                     "actor_identity": "orchestrator-consensus-tool",
                     "created_at": created_at,
@@ -430,7 +430,7 @@ def terminal_body(
             f"- final artifact path or null: `{final_artifact}`",
             f"- validator status summary and evidence paths: `{status}`",
             f"- FinalReport section path or anchor: `{REPORT_FILENAME}#finalreport-final-report-001`",
-            f"- unresolved CanonicalFinding ids: `{unresolved}`",
+            f"- unresolved NormalizedFinding ids: `{unresolved}`",
             "- backlog location: `backlog.md`",
             "",
         ]

@@ -19,7 +19,7 @@ Consensus requires every required validator to be `pass` or `waived`.
 ## ValidationEvidence validation-evidence-001
 ---
 record_type: ValidationEvidence
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <validator-or-orchestrator_identity>
 created_at: <ISO-8601>

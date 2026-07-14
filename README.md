@@ -48,9 +48,18 @@ When `skills/cross-agent-consensus/scripts/consensus` is available, use it for d
 - `config show|validate|paths|setup` handles installed, user-local, project, task-file, and CLI configuration.
 - `prompt` writes exact reviewer, author, validator, re-review, and final-report prompts into the run folder.
 - `capture` preserves raw reviewer, validator, and manual evidence output as protocol records.
-- `conclusion-validation` creates a `scope_triage` batch where the same reviewers validate normalized Canonical Finding conclusions. This is not a fresh review; reviewers answer `agree`, `disagree`, or `needs_human` and must include rationale.
+- `validate --integrity` recomputes recorded artifact, prompt, and evidence
+  digests; `validate --run-events` checks the hash-chained mutation journal and
+  `.cac-events-anchor.json` against deletion, edits, and suffix truncation.
+- `conclusion-validation` creates a `scope_triage` batch where the same reviewers validate proposed Normalized Finding conclusions. This is not a fresh review; reviewers answer `agree`, `disagree`, or `needs_human` and must include rationale.
 - `invoke-agent`, `agent-status`, `agent-watch`, and `agent-cancel` run and monitor explicitly configured external reviewer CLIs with session telemetry.
 - `terminate` writes the terminal human verification artifact, `report.md`.
+
+Every CLI-created run uses `.cac.lock` to serialize protocol-record writes and
+appends successful mutations to `events.jsonl`. `status` derives the current
+phase from protocol records; `events.jsonl` records transitions without adding
+a second mutable run-state file. External invocation approval binds the exact
+prompt, runtime argv, and locally readable artifact version by SHA-256.
 
 ## Reviewers And Focus
 
@@ -64,7 +73,7 @@ Configured CLI reviewers must be invoked with `consensus invoke-agent` before th
 
 Terminal output is `report.md`, not `termination.md`.
 
-The report starts with human-readable result blocks for each Canonical Finding:
+The report starts with human-readable result blocks for each Normalized Finding:
 
 ```text
 Problem:

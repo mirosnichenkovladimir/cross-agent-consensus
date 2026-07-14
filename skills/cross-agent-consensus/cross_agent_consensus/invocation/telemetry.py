@@ -275,20 +275,22 @@ def write_agent_exit(
     signal_or_null: int | None,
     started_monotonic: float | None,
     failure_reason_or_null: str | None,
+    evidence_digests: dict[str, str | None] | None = None,
 ) -> None:
     duration = 0.0 if started_monotonic is None else max(0.0, time.monotonic() - started_monotonic)
-    atomic_write_json(
-        paths.exit,
-        {
-            "schema_version": AGENT_EXIT_SCHEMA,
-            "final_state": final_state,
-            "exit_code_or_null": exit_code_or_null,
-            "signal_or_null": signal_or_null,
-            "duration_seconds": round(duration, 3),
-            "completed_at": utc_now(),
-            "failure_reason_or_null": failure_reason_or_null,
-        },
-    )
+    payload: dict[str, Any] = {
+        "schema_version": AGENT_EXIT_SCHEMA,
+        "final_state": final_state,
+        "exit_code_or_null": exit_code_or_null,
+        "signal_or_null": signal_or_null,
+        "duration_seconds": round(duration, 3),
+        "completed_at": utc_now(),
+        "failure_reason_or_null": failure_reason_or_null,
+    }
+    if evidence_digests is not None:
+        payload["evidence_digest_version"] = "session-evidence-1"
+        payload.update(evidence_digests)
+    atomic_write_json(paths.exit, payload)
 
 
 def mark_state_superseded_by(state_path: Path, *, by_session: str) -> bool:
@@ -369,4 +371,3 @@ def read_state_without_schema(path: Path) -> tuple[str | None, dict[str, Any]]:
     state = read_json_file(path) if path.is_file() else {}
     state_schema = state.pop("schema_version", None)
     return state_schema, state
-

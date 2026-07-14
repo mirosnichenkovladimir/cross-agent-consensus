@@ -4,7 +4,7 @@
 
 Put human verification result blocks first.
 
-### <CanonicalFinding id>: <finding title>
+### <NormalizedFinding id>: <finding title>
 
 Status: <resolved/unresolved/etc>
 Level: <scope/blocking/materiality/severity>
@@ -28,7 +28,7 @@ Required action:
 - terminal condition:
 - reason:
 - final artifact version:
-- unresolved CanonicalFinding ids:
+- unresolved NormalizedFinding ids:
 - validators:
 - agent session states:
 
@@ -37,16 +37,16 @@ Required action:
 ### <reviewer identity>
 
 Raw findings:
-Canonicalized:
+Normalized:
 Discarded:
 Blocking:
 Non-blocking:
-Canonical findings:
+Normalized findings:
 Agreed with another reviewer:
 
 ## Reviewer Agreement
 
-### <CanonicalFinding id>
+### <NormalizedFinding id>
 
 Reviewers:
 Source raw findings:
@@ -79,13 +79,13 @@ Required terminal output fields:
 - validator status summary and evidence paths:
 - agent session summary:
 - FinalReport section path or anchor:
-- unresolved CanonicalFinding ids:
+- unresolved NormalizedFinding ids:
 - backlog location:
 
 ## TerminationRecord termination-001
 ---
 record_type: TerminationRecord
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>
@@ -109,7 +109,7 @@ Allowed `terminal_condition` values: `consensus_reached`, `round_limit_reached`,
 ## FinalReport final-report-001
 ---
 record_type: FinalReport
-schema_version: m2-markdown-1
+schema_version: m2-markdown-2
 run_id: <run_id>
 actor_identity: <orchestrator_identity>
 created_at: <ISO-8601>

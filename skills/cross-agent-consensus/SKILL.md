@@ -98,6 +98,12 @@ See `references/invocation.md` for the per-host peek-loop sketch.
 
 The approval gate lives in code (`--approved` is mandatory before any named CLI launch); the handshake lives here so the operator always knows what is about to run.
 
+Before launch, the CLI records `approval_binding_version: exact-inputs-1` and
+binds the approved prompt, argv, and working directory. A readable local
+ArtifactVersion is bound by its current content digest. Editing the prompt or
+artifact invalidates that approval; regenerate the prompt when needed and ask
+for approval again.
+
 ## M2 Boundary
 
 This package is a design/manual-protocol implementation only. Do not create an automatic cross-runtime runner that executes without explicit participant selection, authorization, prompt capture, and raw-output capture. Do not invent model/provider selection, create JSON schemas, or apply reviewer suggestions directly to an artifact. When the user or Policy explicitly names a runtime/CLI as a participant, the Orchestrator MUST invoke that CLI/tool directly only after the run folder and exact prompt are recorded and either the operator has approved the command for this run or Policy declares `unattended_invocation: true` with scope limits. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not reasons to skip evidence. If these conditions are not met, write the exact manual command or prompt into the run folder and ask the operator to run it.
@@ -110,10 +116,11 @@ When `scripts/consensus` is present in the installed skill package, prefer it fo
 
 - run `scripts/consensus --version` to inspect the installed package version when needed;
 - run `scripts/consensus config show` to inspect layered defaults before relying on saved configuration;
-- run `scripts/consensus init` to create the canonical run folder and initial records;
+- run `scripts/consensus init` to create the protocol run folder and initial records;
 - run `scripts/consensus validate --pre-execution` before generating prompts or invoking any actor;
+- run `scripts/consensus validate --integrity` after copying evidence and before terminal output;
 - run `scripts/consensus prompt` to create exact prompt payload files, using manual prompt files only as fallback;
-- run `scripts/consensus conclusion-validation` after normalization when recalled reviewers must validate proposed Canonical Finding conclusions;
+- run `scripts/consensus conclusion-validation` after normalization when recalled reviewers must validate proposed Normalized Finding conclusions;
 - run `scripts/consensus invocation-ready` before any direct external CLI/runtime invocation;
 - run `scripts/consensus capture` after command/manual output to preserve raw evidence in the run folder;
 - run `scripts/consensus status` before remediation loops to inspect ReReviewDecision attempt counts and agent session accounting;
@@ -223,7 +230,7 @@ The init record set must provide enough information to create:
 
 ## Run Layout
 
-Run records are part of this skill package's contract, not a host-harness convention. Any Orchestrator implementing this skill must create the run folder before invoking an Author, Reviewer, validator, or external agent CLI. The canonical prompts and raw outputs live in the active round folder; host temp paths such as `/tmp` are scratch-only and are not audit evidence unless copied into the run folder and referenced from a record.
+Run records are part of this skill package's contract, not a host-harness convention. Any Orchestrator implementing this skill must create the run folder before invoking an Author, Reviewer, validator, or external agent CLI. The recorded prompts and raw outputs live in the active round folder; host temp paths such as `/tmp` are scratch-only and are not audit evidence unless copied into the run folder and referenced from a record.
 
 Use the round-first grouped Markdown layout from `references/record-contract.md`:
 
@@ -250,6 +257,10 @@ runs/<run_id>/
 ```
 
 Every protocol record section must include a stable heading, a `---`-delimited YAML frontmatter block, common record fields, type-specific fields, and cross-reference ids. Frontmatter is authoritative.
+
+CLI mutations are serialized by root `.cac.lock` and appended to root
+`events.jsonl`. `scripts/consensus status` derives the current phase from the
+protocol records; never edit `events.jsonl` to change that phase.
 
 ## Document-Consensus Defaults
 
@@ -281,14 +292,18 @@ Consensus may not be declared unless every required validator has `ValidationEvi
 3. Run or manually request Author execution when the task produces or changes an artifact; record the produced content, patch, or stable locator as ArtifactVersion `v1` or the next version.
 4. Give each first-round reviewer only the TaskBrief, Policy, Participants needed for identity, ReviewScope, ReviewBatch mode, and target ArtifactVersion.
 5. Capture each reviewer's raw output with `scripts/consensus capture` when available, otherwise in `rounds/round-NNN/reviews/<reviewer_identity>.md` from `templates/review.md`. Do not rewrite raw output after capture. If raw stdout/stderr was first captured by a host process, copy it into the run folder before normalization.
-6. Normalize Raw Findings into Canonical Findings in `rounds/round-NNN/normalization.md`.
-7. When the normalized superset needs reviewer confirmation, run `scripts/consensus conclusion-validation` to append a `scope_triage` ReviewBatch with `source_finding_ids` set to the Canonical Finding ids, then capture recalled reviewer outputs before changing conclusions.
-8. Require Author Responses for every in-scope blocking material Canonical Finding that remains confirmed as an Author-facing blocker.
+   CLI capture records the copied payload digest and its origin. A `live_cli`
+   capture also records the exact completed session path and prompt digest.
+6. Normalize Raw Findings into Normalized Findings in `rounds/round-NNN/normalization.md`.
+7. When the normalized superset needs reviewer confirmation, run `scripts/consensus conclusion-validation` to append a `scope_triage` ReviewBatch with `source_finding_ids` set to the Normalized Finding ids, then capture recalled reviewer outputs before changing conclusions.
+8. Require Author Responses for every in-scope blocking material Normalized Finding that remains confirmed as an Author-facing blocker.
 9. Create a new ArtifactVersion for each author revision.
-10. Run linked re-review against Canonical Findings, Author Responses, revisions, and relevant Validation Evidence. Before generating another re-review prompt or skeleton, all existing protocol records must pass record/link validation and the finding must be below `max_remediation_rounds_per_finding`. If an unresolved `still_valid`, `disputed`, or `needs_human` decision has reached the cap, stop remediation, record or use the generated EscalationRecord in `escalations.md`, request a HumanDecision, and terminate as `escalated_to_human` or follow the human/policy decision.
+10. Run linked re-review against Normalized Findings, Author Responses, revisions, and relevant Validation Evidence. Before generating another re-review prompt or skeleton, all existing protocol records must pass record/link validation and the finding must be below `max_remediation_rounds_per_finding`. If an unresolved `still_valid`, `disputed`, or `needs_human` decision has reached the cap, stop remediation, record or use the generated EscalationRecord in `escalations.md`, request a HumanDecision, and terminate as `escalated_to_human` or follow the human/policy decision.
 11. Append ValidationEvidence for required validators to `rounds/round-NNN/validation.md`, using `scripts/consensus capture --phase validator` when available. Root `validation.md` is a run-level summary.
 12. Escalate or record Human Decisions in `escalations.md` when needed.
-13. Terminate with `scripts/consensus terminate` when available, otherwise create `report.md`. The file must start with human-readable finding blocks using `Problem`, `Explanation`, and `Required action`, then include parseable TerminationRecord and FinalReport sections.
+13. Run `scripts/consensus validate --integrity`; resolve every artifact,
+    prompt, evidence, or session digest mismatch.
+14. Terminate with `scripts/consensus terminate` when available, otherwise create `report.md`. The file must start with human-readable finding blocks using `Problem`, `Explanation`, and `Required action`, then include parseable TerminationRecord and FinalReport sections.
 
 ## Terminal Conditions
 
@@ -311,7 +326,7 @@ At terminal state, report:
 - validator status summary and validation evidence paths;
 - agent session summary, distinguishing failed invocations from completed review or re-review decisions;
 - FinalReport section path or anchor inside `report.md`;
-- unresolved canonical finding IDs, if any;
+- unresolved normalized finding IDs, if any;
 - backlog location for non-blocking, deferred, and out-of-scope items.
 
 ## Run Feedback (opt-in)
