@@ -34,10 +34,17 @@ def main() -> int:
     )
     parser.add_argument("--delay-seconds", type=float, default=1.0)
     parser.add_argument("--session-id", default="fake-session-001")
+    parser.add_argument("--resume")
+    parser.add_argument("-p", "--print", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--output-format")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--capture-input")
+    parser.add_argument("--mutate-path")
     args = parser.parse_args()
     prompt = sys.stdin.read()
+    if args.mutate_path:
+        Path(args.mutate_path).write_text("provider mutation\n", encoding="utf-8")
     if args.capture_input:
         Path(args.capture_input).write_text(
             json.dumps({"argv": sys.argv[1:], "stdin": prompt}, sort_keys=True) + "\n",
@@ -46,7 +53,15 @@ def main() -> int:
     if args.mode == "raw":
         print(f"prompt={prompt}")
     elif args.mode == "structured":
-        print(json.dumps({"type": "session", "session_id": args.session_id}))
+        print(
+            json.dumps(
+                {
+                    "type": "thread.started",
+                    "thread_id": args.session_id,
+                    "session_id": args.session_id,
+                }
+            )
+        )
         print(json.dumps({"type": "result", "result": f"reviewed:{prompt}"}))
     elif args.mode == "malformed_stream":
         print("{not-json")

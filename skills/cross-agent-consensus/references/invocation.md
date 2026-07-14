@@ -161,3 +161,35 @@ may have changed the worktree or external service before it stopped.
 `consensus new-artifact --execution-attempt <attempt-id>` is the Author receipt
 path. It verifies that `--produced-by` names the same ParticipantIdentity and
 then binds the new `ArtifactVersion` record hash to that attempt.
+
+## Provider-session continuation
+
+CAC `session-NNN` identifies one supervised operating-system process. A Codex
+thread ID or Claude session UUID identifies the provider conversation that may
+span several CAC process sessions. After a successful resumable-provider exit,
+CAC extracts that provider identifier and appends `provider_session_captured`
+before it writes promoted terminal output.
+
+Resume one predecessor with:
+
+```text
+scripts/consensus invoke-agent ... \
+  --resume-provider-session-entry provider-session-attempt-... \
+  --command -- <fresh ExecutionProfile argv>
+```
+
+The adapter converts the fresh ExecutionProfile argv to provider-specific
+resume argv. Provider-native resume selectors in an ExecutionProfile or direct
+base command are rejected. CAC rejects a stale non-leaf entry, a different ParticipantIdentity, role,
+ExecutionProfile, adapter, run, or ArtifactVersion lineage. Package or protocol
+definition drift requires `--definition-drift-resolution`; an accepting choice
+also records `--operator-identity`, plus `--definition-drift-reference` for a
+named migration or compatibility rule. The exact resumed argv and provider
+identifier receive a new OperatorApproval binding.
+
+Immediately before provider launch, `execution_attempt_started` and
+`provider_session_resume_reserved` are appended under the same run lock. A
+second attempt cannot reserve that predecessor. `provider_session_captured`
+must consume the matching reservation before the execution attempt receives a
+terminal observation. Any RunJournal integrity diagnostic blocks resume argv
+construction.

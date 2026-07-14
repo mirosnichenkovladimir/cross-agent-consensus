@@ -36,6 +36,10 @@ from cross_agent_consensus.models import (
     InvocationReadyInput,
 )
 from cross_agent_consensus.profiles import bind_recorded_invocation_profile
+from cross_agent_consensus.provider_sessions import (
+    capture_provider_session,
+    resolve_provider_session_continuation,
+)
 from cross_agent_consensus.records import parse_run_records
 
 from .adapters import GenericCliPlayer, ManualPlayer, ProviderOutputError, StructuredJsonCliPlayer, get_player_adapter
@@ -186,6 +190,17 @@ def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPath
         heartbeat_interval_seconds=args.heartbeat_interval_seconds,
         session_id=paths.session.name,
         retry_safety=resolved_retry_safety(args.phase, args.retry_safety),
+        resume_provider_session_entry_id=getattr(
+            args, "resume_provider_session_entry_id", None
+        ),
+        provider_session_id=getattr(args, "provider_session_id", None),
+        artifact_lineage_root_id=getattr(args, "artifact_lineage_root_id", None),
+        continuation_definition_sha256=getattr(
+            args, "continuation_definition_sha256", None
+        ),
+        provider_session_definition_resolution=getattr(
+            args, "provider_session_definition_resolution", None
+        ),
         prompt_transport=getattr(args, "prompt_transport", "stdin"),
         output_mode=getattr(args, "output_mode", "raw_stdout"),
         env_allowlist=list(getattr(args, "env_allowlist", [])),
@@ -430,17 +445,40 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
             append_agent_event(paths, invocation, "timed_out", exit_code=return_code, signal=signal_number)
         elif return_code == 0:
             final_state = "completed"
+            require_structured_output = (
+                isinstance(adapter, StructuredJsonCliPlayer)
+                and (
+                    invocation.output_mode == "stream_json"
+                    or adapter.command_requests_json(command_spec.argv)
+                )
+            )
+            if (
+                require_structured_output
+                and isinstance(adapter, StructuredJsonCliPlayer)
+                and not adapter.stream_has_terminal_event(paths.stdout)
+            ):
+                raise ProviderOutputError(adapter.structured_output_failure(paths.stdout))
+            capabilities = adapter.probe(command_spec.argv)
+            if capabilities.supports_resume:
+                provider_session_id = adapter.extract_provider_session_id(paths)
+                if provider_session_id is None:
+                    raise ProviderOutputError("missing_session_identifier")
+                try:
+                    capture_provider_session(
+                        invocation,
+                        provider_session_id=provider_session_id,
+                        effective_command=command_spec.argv,
+                    )
+                except ValueError as exc:
+                    raise ProviderOutputError(
+                        "receipt_integrity_failure", str(exc)
+                    ) from exc
+                write_invocation_json(paths, invocation)
             invocation.raw_output_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(paths.stdout, invocation.raw_output_path)
             final_output = adapter.extract_final_output(
                 paths,
-                require_structured=(
-                    isinstance(adapter, StructuredJsonCliPlayer)
-                    and (
-                        invocation.output_mode == "stream_json"
-                        or adapter.command_requests_json(command_spec.argv)
-                    )
-                ),
+                require_structured=require_structured_output,
             )
             final_output_path = session_relative(final_output, paths.session)
             # Mirror the extracted final-output beside --raw-output so the path the
@@ -548,6 +586,8 @@ def exact_invocation_approval(
             prompt_path=Path(args.prompt),
             command=command,
             working_directory=args.cwd,
+            resume_provider_session_entry_id=args.resume_provider_session_entry_id,
+            provider_session_id=getattr(args, "provider_session_id", None),
         )
     return ensure_invocation_approval(
         Path(args.run),
@@ -560,6 +600,8 @@ def exact_invocation_approval(
         prompt_path=Path(args.prompt),
         command=command,
         working_directory=args.cwd,
+        resume_provider_session_entry_id=args.resume_provider_session_entry_id,
+        provider_session_id=getattr(args, "provider_session_id", None),
         mechanism="cli_approved_flag" if args.approved else "policy_unattended",
     )
 
@@ -570,12 +612,71 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
     command, profile_messages = bind_recorded_invocation_profile(
         parse_run_records(run), args, command
     )
+    execution_profile_command = list(command)
     require_existing_approval = bool(getattr(args, "require_existing_approval", False))
     try:
         if profile_messages:
             for message in profile_messages:
                 eprint(f"error: {message}")
             return 3
+        resume_entry_id = getattr(args, "resume_provider_session_entry_id", None)
+        if resume_entry_id:
+            adapter = get_player_adapter(args.player)
+            if not isinstance(adapter, GenericCliPlayer):
+                raise ValueError(f"player {args.player} cannot resume a provider session")
+            if adapter.has_native_resume_selector(command):
+                raise ValueError(
+                    "ExecutionProfile command must be fresh argv; remove the provider-native resume selector"
+                )
+            capabilities = adapter.probe(command)
+            if (
+                not capabilities.supports_resume
+                or not getattr(args, "execution_profile_supports_resume", False)
+            ):
+                raise ValueError(
+                    f"ExecutionProfile adapter {args.player} has not passed the provider resume conformance suite"
+                )
+            (
+                provider_session_id,
+                lineage_root,
+                definition_digest,
+                accepted_resolution,
+            ) = resolve_provider_session_continuation(
+                run,
+                parse_run_records(run),
+                provider_session_entry_id=resume_entry_id,
+                participant_identity=args.actor,
+                participant_profile_id=(
+                    args.participant_profile_id or "legacy-inline-participant-profile"
+                ),
+                execution_profile_id=(
+                    args.execution_profile_id
+                    or f"legacy-inline-{args.player}-execution-profile"
+                ),
+                player_id=args.player,
+                phase=args.phase,
+                definition_drift_resolution=getattr(
+                    args, "definition_drift_resolution", None
+                ),
+                operator_identity=getattr(args, "operator_identity", None),
+                definition_drift_reference=getattr(
+                    args, "definition_drift_reference", None
+                ),
+            )
+            command = adapter.build_resume_command(command, provider_session_id)
+            args.provider_session_id = provider_session_id
+            args.artifact_lineage_root_id = lineage_root
+            args.continuation_definition_sha256 = definition_digest
+            args.provider_session_definition_resolution = accepted_resolution
+        else:
+            adapter = get_player_adapter(args.player)
+            if (
+                isinstance(adapter, GenericCliPlayer)
+                and adapter.has_native_resume_selector(command)
+            ):
+                raise ValueError(
+                    "provider-native resume selector requires --resume-provider-session-entry"
+                )
         if args.stale_timeout_seconds < args.idle_timeout_seconds:
             raise ValueError("--stale-timeout-seconds must be greater than or equal to --idle-timeout-seconds")
         secret_messages = secret_argv_errors(command)
@@ -655,9 +756,13 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             prompt=args.prompt,
             raw_output=args.raw_output,
             approved=args.approved,
-            command=command,
+            command=(execution_profile_command if resume_entry_id else command),
         )
-        messages = invocation_ready_errors(run, readiness_args, command)
+        messages = invocation_ready_errors(
+            run,
+            readiness_args,
+            execution_profile_command if resume_entry_id else command,
+        )
         messages.extend(invoke_agent_round_path_errors(run, args))
         if messages:
             reason = "; ".join(messages)

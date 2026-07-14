@@ -302,8 +302,12 @@ class ConfigTests(unittest.TestCase):
                 "command entries must be non-empty strings without NUL bytes",
             ),
             (
-                {"supports_resume": True},
-                "supports_resume is true but adapter codex-cli cannot resume",
+                {"supports_resume": True, "adapter": "generic-cli", "output_mode": "raw_stdout"},
+                "supports_resume is true but adapter generic-cli cannot resume",
+            ),
+            (
+                {"command": ["codex", "exec", "resume", "foreign-thread", "-"]},
+                "command must be fresh argv; provider-native resume selectors",
             ),
             (
                 {"command": ["codex", "--api-key=abc123"]},

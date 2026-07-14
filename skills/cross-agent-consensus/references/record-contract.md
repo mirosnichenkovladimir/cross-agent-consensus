@@ -164,7 +164,7 @@ runs/<run_id>/
 | `TerminationRecord` | `termination_record_id`, `terminal_condition`, `reason`, `final_artifact_version_id_or_null`, `unresolved_finding_ids`, `supporting_record_ids` |
 | `FinalReport` | `final_report_id`, `termination_record_id`, `terminal_condition`, `final_artifact_version_id_or_null`, `validator_status`, `unresolved_finding_ids`, `backlog_path` |
 | `ConfigResolution` | `config_resolution_id`, `config_schema_version`, `sources`, `effective_values`, `resolved_participant_identities`, `resolved_execution_profiles`, `diagnostics`, `redactions` |
-| `OperatorApproval` | `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, `operator_identity_or_null`; current CLI-created approvals also record `approval_binding_version: exact-inputs-2` and `approved_invocations` keyed by `participant_identity`, `participant_profile_id`, and `execution_profile_id` |
+| `OperatorApproval` | `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, `operator_identity_or_null`; current CLI-created approvals also record `approval_binding_version: exact-inputs-2` and `approved_invocations` keyed by `participant_identity`, `participant_profile_id`, and `execution_profile_id`; resumed bindings add the provider-session entry and provider identifier |
 
 ReviewBatch sections may use optional frontmatter `review_focus` to record review lenses or emphasis areas. `review_focus` never changes Participants and must not be used as `reviewer_identity`.
 
@@ -194,6 +194,19 @@ anchor, and agreement between the last event phase and the phase derived from
 protocol records. Version-1 journals remain readable for runs whose recorded
 package version predates 0.10.0 and which have no version-2 anchor. A mutable
 event `schema_version` value alone cannot select legacy validation.
+
+For resumable Codex and Claude adapters, `provider_session_captured` binds a
+provider conversation identifier to the distinct CAC `session-NNN`, execution
+attempt, ParticipantIdentity, ParticipantProfile, ExecutionProfile, phase,
+ArtifactVersion lineage root, definition digest, prompt digest, and effective
+argv digest. A resumed entry names its earlier
+`predecessor_provider_session_entry_id_or_null`. Validation rejects a
+predecessor owned by another ParticipantIdentity or using another role,
+ExecutionProfile, adapter, run, or ArtifactVersion lineage. Every predecessor
+has at most one successor, and a provider capture must appear after its
+execution-attempt start and before that attempt's terminal observation. A
+resumed attempt appends `provider_session_resume_reserved` under the same lock
+as `execution_attempt_started`; the later capture consumes that reservation.
 
 The current phase is derived from protocol records; `events.jsonl` is an audit
 journal, not a second source of lifecycle state. Mutating commands acquire

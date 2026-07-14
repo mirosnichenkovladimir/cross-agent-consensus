@@ -78,6 +78,112 @@ class InvocationPlayerTests(unittest.TestCase):
         self.assertTrue(CodexCliPlayer().command_requests_json(["codex", "exec", "--json", "-"]))
         self.assertFalse(CodexCliPlayer().command_requests_json(["codex", "exec", "-"]))
 
+    def test_codex_provider_session_capture_and_resume_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            paths = session_paths(Path(tmp_name) / "session-001")
+            paths.session.mkdir()
+            paths.stdout.write_text(
+                json.dumps({"type": "thread.started", "thread_id": "thread-123"}) + "\n",
+                encoding="utf-8",
+            )
+            adapter = CodexCliPlayer()
+
+            self.assertEqual(adapter.extract_provider_session_id(paths), "thread-123")
+            self.assertEqual(
+                adapter.build_resume_command(
+                    ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
+                    "thread-123",
+                ),
+                [
+                    "codex",
+                    "exec",
+                    "resume",
+                    "--skip-git-repo-check",
+                    "--json",
+                    "thread-123",
+                    "-",
+                ],
+            )
+            self.assertTrue(adapter.probe(["codex"]).supports_resume)
+            self.assertTrue(
+                adapter.has_native_resume_selector(
+                    ["codex", "exec", "--json", "resume", "thread-123", "-"]
+                )
+            )
+            self.assertTrue(
+                adapter.has_native_resume_selector(
+                    ["codex", "--profile", "default", "exec", "resume", "thread-123", "-"]
+                )
+            )
+            self.assertFalse(
+                adapter.has_native_resume_selector(
+                    ["codex", "exec", "--profile", "resume", "--json", "-"]
+                )
+            )
+            self.assertEqual(
+                adapter.build_resume_command(
+                    ["codex", "--profile", "default", "exec", "--json", "-"],
+                    "thread-123",
+                ),
+                [
+                    "codex",
+                    "--profile",
+                    "default",
+                    "exec",
+                    "resume",
+                    "--json",
+                    "thread-123",
+                    "-",
+                ],
+            )
+
+    def test_claude_provider_session_capture_and_resume_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            paths = session_paths(Path(tmp_name) / "session-001")
+            paths.session.mkdir()
+            paths.stdout.write_text(
+                json.dumps({"type": "system", "session_id": "claude-123"}) + "\n",
+                encoding="utf-8",
+            )
+            adapter = ClaudeCliPlayer()
+
+            self.assertEqual(adapter.extract_provider_session_id(paths), "claude-123")
+            self.assertEqual(
+                adapter.build_resume_command(
+                    ["claude", "-p", "--output-format", "stream-json"],
+                    "claude-123",
+                ),
+                [
+                    "claude",
+                    "-p",
+                    "--output-format",
+                    "stream-json",
+                    "--resume",
+                    "claude-123",
+                ],
+            )
+            with self.assertRaisesRegex(ValueError, "already contains"):
+                adapter.build_resume_command(["claude", "-p", "--resume", "old"], "new")
+            self.assertTrue(adapter.probe(["claude"]).supports_resume)
+            self.assertTrue(adapter.has_native_resume_selector(["claude", "-p", "-r", "old"]))
+            self.assertTrue(
+                adapter.has_native_resume_selector(["claude", "-p", "-rold"])
+            )
+            self.assertTrue(adapter.has_native_resume_selector(["claude", "-p", "--continue"]))
+            self.assertTrue(
+                adapter.has_native_resume_selector(["claude", "-p", "--from-pr", "123"])
+            )
+            self.assertTrue(
+                adapter.has_native_resume_selector(
+                    ["/usr/bin/env", "claude", "-p", "-c"]
+                )
+            )
+            self.assertFalse(
+                adapter.has_native_resume_selector(
+                    [sys.executable, "-c", "print('not claude')"]
+                )
+            )
+
     def test_structured_player_parses_events_and_final_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)

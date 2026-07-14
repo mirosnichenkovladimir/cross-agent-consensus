@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.15.0] - 2026-07-14
+
+### Added
+- Codex and Claude adapters extract provider conversation identifiers and build
+  provider-specific resume argv. Built-in Execution Profiles declare resume
+  only after passing `cross-agent-consensus-provider-conformance-1`.
+- `provider_session_captured` RunJournal entries bind the provider identifier
+  to its distinct CAC `session-NNN`, execution attempt, ParticipantIdentity,
+  ParticipantProfile, ExecutionProfile, phase, ArtifactVersion lineage,
+  package/protocol definitions, prompt, and effective argv.
+- `invoke-agent --resume-provider-session-entry <entry-id>` resumes one
+  predecessor entry. Definition drift accepts only a recorded profile,
+  named migration, or documented compatibility rule with operator identity;
+  new-run and abort decisions remain fail-closed.
+
+### Changed
+- Exact-input OperatorApproval bindings include the selected provider-session
+  entry and provider identifier for resumed argv.
+- A resumable structured provider must emit its provider conversation
+  identifier. Missing identifiers fail as `missing_session_identifier` before
+  terminal provider output is promoted.
+
+### Fixed
+- Provider conversation identifiers cannot be shared across distinct
+  ParticipantIdentity values, even when participants use the same
+  ExecutionProfile. RunJournal validation enforces predecessor ownership and
+  execution-attempt linkage.
+- Package, protocol, identity/profile, role, adapter, run, or ArtifactVersion
+  lineage drift cannot silently resume an older provider conversation.
+- Only the latest leaf provider-session entry may be resumed. A predecessor
+  receives an atomic RunJournal reservation before provider launch, cannot
+  acquire a second reservation or successor, and RunJournal validation rejects
+  provider-session branches or captures written after an attempt terminated.
+- Recorded Execution Profiles and direct base commands reject provider-native
+  Codex/Claude resume selectors; only `--resume-provider-session-entry` may
+  construct resumed argv.
+- Historical `exact-inputs-1` approvals remain compatible with fresh
+  invocations but cannot authorize a provider-session continuation.
+- Resume construction fails when the existing RunJournal has transition,
+  uniqueness, hash-chain, or provider-session diagnostics; audit errors cannot
+  remain advisory at the launch boundary.
+
 ## [0.14.0] - 2026-07-14
 
 ### Added

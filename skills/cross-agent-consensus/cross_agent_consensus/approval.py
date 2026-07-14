@@ -62,6 +62,8 @@ def approval_binding(
     command: list[str],
     artifact_version_id: str | None = None,
     working_directory: str | Path | None = None,
+    resume_provider_session_entry_id: str | None = None,
+    provider_session_id: str | None = None,
 ) -> dict[str, Any]:
     if not prompt_path.is_file():
         raise ValueError(f"approval prompt not found: {prompt_path}")
@@ -92,6 +94,8 @@ def approval_binding(
         "working_directory": str(Path(working_directory or Path.cwd()).expanduser().resolve()),
         "artifact_version_id_or_null": artifact_id,
         "artifact_sha256_or_null": artifact_sha,
+        "resume_provider_session_entry_id_or_null": resume_provider_session_entry_id,
+        "provider_session_id_or_null": provider_session_id,
     }
 
 
@@ -150,6 +154,8 @@ def _binding_key(binding: dict[str, Any]) -> tuple[Any, ...]:
         binding.get("working_directory"),
         binding.get("artifact_version_id_or_null"),
         binding.get("artifact_sha256_or_null"),
+        binding.get("resume_provider_session_entry_id_or_null"),
+        binding.get("provider_session_id_or_null"),
     )
 
 
@@ -184,7 +190,12 @@ def approval_record_for_binding(records: list[Record], binding: dict[str, Any]) 
                 continue
             if _binding_key(candidate) == wanted:
                 return record
-            if "execution_profile_id" not in candidate and _legacy_binding_key(candidate) == legacy_wanted:
+            if (
+                "execution_profile_id" not in candidate
+                and binding.get("resume_provider_session_entry_id_or_null") is None
+                and binding.get("provider_session_id_or_null") is None
+                and _legacy_binding_key(candidate) == legacy_wanted
+            ):
                 return record
     return None
 
@@ -256,6 +267,8 @@ def ensure_invocation_approval(
     command: list[str],
     mechanism: str = "cli_approved_flag",
     working_directory: str | Path | None = None,
+    resume_provider_session_entry_id: str | None = None,
+    provider_session_id: str | None = None,
 ) -> dict[str, Any]:
     """Return an exact binding, recording it when no identical approval exists."""
 
@@ -272,6 +285,8 @@ def ensure_invocation_approval(
         prompt_path=prompt_path,
         command=command,
         working_directory=working_directory,
+        resume_provider_session_entry_id=resume_provider_session_entry_id,
+        provider_session_id=provider_session_id,
     )
     if not approval_binding_exists(records, binding):
         stamp_operator_approval(
@@ -297,6 +312,8 @@ def verify_invocation_approval(
     prompt_path: Path,
     command: list[str],
     working_directory: str | Path | None = None,
+    resume_provider_session_entry_id: str | None = None,
+    provider_session_id: str | None = None,
 ) -> dict[str, Any]:
     """Require a previously recorded binding for the invocation's current inputs."""
 
@@ -313,6 +330,8 @@ def verify_invocation_approval(
         prompt_path=prompt_path,
         command=command,
         working_directory=working_directory,
+        resume_provider_session_entry_id=resume_provider_session_entry_id,
+        provider_session_id=provider_session_id,
     )
     approval_record = approval_record_for_binding(records, binding)
     if approval_record is None:

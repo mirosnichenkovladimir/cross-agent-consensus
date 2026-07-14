@@ -64,6 +64,7 @@ from cross_agent_consensus.next_action import (
     derive_next_action_plan,
     next_action_plan_json,
 )
+from cross_agent_consensus.provider_sessions import DEFINITION_DRIFT_RESOLUTIONS
 from cross_agent_consensus.markdown_records import (
     frontmatter,
     parse_records_from_file,
@@ -500,11 +501,10 @@ def setup_config_payload() -> dict[str, Any]:
                 "--include-partial-messages",
                 "--permission-mode",
                 "dontAsk",
-                "--no-session-persistence",
             ],
             "prompt_transport": "stdin",
             "output_mode": "stream_json",
-            "supports_resume": False,
+            "supports_resume": True,
             "env": [
                 "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "CLAUDE_CONFIG_DIR",
                 "ANTHROPIC_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
@@ -521,7 +521,7 @@ def setup_config_payload() -> dict[str, Any]:
             "command": ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
             "prompt_transport": "stdin",
             "output_mode": "stream_json",
-            "supports_resume": False,
+            "supports_resume": True,
             "env": [
                 "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME",
                 "OPENAI_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
@@ -1292,7 +1292,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     invoke.add_argument(
         "--operator-identity",
-        help="Identity recorded with --approve-ambiguous-retry.",
+        help=(
+            "Identity recorded with --approve-ambiguous-retry or an accepted "
+            "provider-session definition migration."
+        ),
+    )
+    invoke.add_argument(
+        "--resume-provider-session-entry",
+        dest="resume_provider_session_entry_id",
+        help=(
+            "RunJournal provider_session_entry_id to resume. The ParticipantIdentity, "
+            "role, ExecutionProfile, adapter, run, and ArtifactVersion lineage must match."
+        ),
+    )
+    invoke.add_argument(
+        "--definition-drift-resolution",
+        choices=DEFINITION_DRIFT_RESOLUTIONS,
+        help=(
+            "Recorded decision when package or protocol definitions changed since capture. "
+            "Accepting choices require --operator-identity."
+        ),
+    )
+    invoke.add_argument(
+        "--definition-drift-reference",
+        help=(
+            "Migration identifier or compatibility-rule document reference. Required by "
+            "apply_named_migration and authorize_compatibility_rule."
+        ),
     )
     invoke.add_argument("--command", nargs=argparse.REMAINDER)
     invoke.set_defaults(func=cmd_invoke_agent)

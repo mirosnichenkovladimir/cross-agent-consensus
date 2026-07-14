@@ -23,11 +23,22 @@ from cross_agent_consensus.models import (
 from .readiness import runtime_command
 from .telemetry import agent_event
 
+PROVIDER_RESUME_CONFORMANCE_SUITE = "cross-agent-consensus-provider-conformance-1"
+
+
+def provider_command_index(command: list[str], executable_name: str) -> int | None:
+    """Locate a provider executable in direct or ``env``-wrapped argv."""
+
+    for index, argument in enumerate(command):
+        if Path(argument).name == executable_name:
+            return index
+    return None
+
 
 class ProviderOutputError(ValueError):
-    def __init__(self, failure_mode: str) -> None:
+    def __init__(self, failure_mode: str, message: str | None = None) -> None:
         self.failure_mode = failure_mode
-        super().__init__(failure_mode.replace("_", " "))
+        super().__init__(message or failure_mode.replace("_", " "))
 
 
 class GenericCliPlayer:
@@ -45,7 +56,17 @@ class GenericCliPlayer:
             prompt_transports=["stdin"],
             output_modes=["raw_stdout"],
             executable_path_or_null=executable_path,
+            resume_conformance_suite_or_null=None,
         )
+
+    def extract_provider_session_id(self, paths: AgentSessionPaths) -> str | None:
+        return None
+
+    def has_native_resume_selector(self, command: list[str]) -> bool:
+        return False
+
+    def build_resume_command(self, command: list[str], provider_session_id: str) -> list[str]:
+        raise ValueError(f"player {self.player_id} does not support provider-session resume")
 
     def build_command(self, invocation: AgentInvocation) -> CommandSpec:
         capabilities = self.probe(invocation.command)
@@ -96,6 +117,7 @@ class StructuredJsonCliPlayer(GenericCliPlayer):
             prompt_transports=["stdin"],
             output_modes=["stream_json", "raw_stdout"],
             executable_path_or_null=capabilities.executable_path_or_null,
+            resume_conformance_suite_or_null=None,
         )
 
     def build_command(self, invocation: AgentInvocation) -> CommandSpec:
@@ -310,6 +332,53 @@ class ClaudeCliPlayer(StructuredJsonCliPlayer):
                 return True
         return False
 
+    def probe(self, command: list[str]) -> PlayerCapabilities:
+        capabilities = super().probe(command)
+        return PlayerCapabilities(
+            player_id=self.player_id,
+            executable=capabilities.executable,
+            supports_json_events=True,
+            supports_resume=True,
+            supports_cancel=True,
+            prompt_transports=capabilities.prompt_transports,
+            output_modes=capabilities.output_modes,
+            executable_path_or_null=capabilities.executable_path_or_null,
+            resume_conformance_suite_or_null=PROVIDER_RESUME_CONFORMANCE_SUITE,
+        )
+
+    def extract_provider_session_id(self, paths: AgentSessionPaths) -> str | None:
+        return self._first_string_field(paths.stdout, "session_id")
+
+    def has_native_resume_selector(self, command: list[str]) -> bool:
+        provider_index = provider_command_index(command, "claude")
+        arguments = (
+            command[provider_index + 1 :] if provider_index is not None else command
+        )
+        return any(
+            argument in {"--resume", "-r", "--continue", "--from-pr"}
+            or (argument == "-c" and provider_index is not None)
+            or (argument.startswith("-r") and argument != "-r")
+            or argument.startswith(("--resume=", "--continue=", "--from-pr="))
+            for argument in arguments
+        )
+
+    def build_resume_command(self, command: list[str], provider_session_id: str) -> list[str]:
+        if self.has_native_resume_selector(command):
+            raise ValueError("Claude command already contains a resume selector")
+        return [*command, "--resume", provider_session_id]
+
+    def _first_string_field(self, path: Path, field: str) -> str | None:
+        if not path.is_file():
+            return None
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get(field), str) and payload[field]:
+                return str(payload[field])
+        return None
+
     def normalized_event_type(self, payload: dict[str, Any], native_type: str) -> str:
         if native_type == "assistant":
             return "message"
@@ -340,6 +409,98 @@ class CodexCliPlayer(StructuredJsonCliPlayer):
 
     def command_requests_json(self, command: list[str]) -> bool:
         return "--json" in command
+
+    def probe(self, command: list[str]) -> PlayerCapabilities:
+        capabilities = super().probe(command)
+        return PlayerCapabilities(
+            player_id=self.player_id,
+            executable=capabilities.executable,
+            supports_json_events=True,
+            supports_resume=True,
+            supports_cancel=True,
+            prompt_transports=capabilities.prompt_transports,
+            output_modes=capabilities.output_modes,
+            executable_path_or_null=capabilities.executable_path_or_null,
+            resume_conformance_suite_or_null=PROVIDER_RESUME_CONFORMANCE_SUITE,
+        )
+
+    def extract_provider_session_id(self, paths: AgentSessionPaths) -> str | None:
+        if not paths.stdout.is_file():
+            return None
+        for line in paths.stdout.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            thread_id = payload.get("thread_id")
+            if payload.get("type") == "thread.started" and isinstance(thread_id, str) and thread_id:
+                return thread_id
+        return None
+
+    def has_native_resume_selector(self, command: list[str]) -> bool:
+        provider_index = provider_command_index(command, "codex")
+        if provider_index is None:
+            return False
+        try:
+            exec_index = max(
+                index
+                for index in range(provider_index + 1, len(command))
+                if command[index] == "exec"
+            )
+        except ValueError:
+            return False
+        options_with_values = {
+            "--add-dir",
+            "--cd",
+            "--color",
+            "--config",
+            "--image",
+            "--model",
+            "--output-schema",
+            "--profile",
+            "--sandbox",
+            "-C",
+            "-c",
+            "-i",
+            "-m",
+            "-p",
+            "-s",
+        }
+        index = exec_index + 1
+        while index < len(command):
+            argument = command[index]
+            if argument == "--":
+                return False
+            if argument in options_with_values:
+                index += 2
+                continue
+            if argument.startswith("-"):
+                index += 1
+                continue
+            return argument == "resume"
+        return False
+
+    def build_resume_command(self, command: list[str], provider_session_id: str) -> list[str]:
+        provider_index = provider_command_index(command, "codex")
+        exec_indices = (
+            [
+                index
+                for index in range(provider_index + 1, len(command))
+                if command[index] == "exec"
+            ]
+            if provider_index is not None
+            else []
+        )
+        if not exec_indices or self.has_native_resume_selector(command):
+            raise ValueError("Codex resume requires a fresh `codex exec ...` command")
+        exec_index = exec_indices[-1]
+        resumed = list(command)
+        resumed.insert(exec_index + 1, "resume")
+        trailing_prompt_index = len(resumed) - 1 if resumed[-1:] == ["-"] else len(resumed)
+        resumed.insert(trailing_prompt_index, provider_session_id)
+        return resumed
 
     def normalized_event_type(self, payload: dict[str, Any], native_type: str) -> str:
         item = payload.get("item")
@@ -375,6 +536,7 @@ class ManualPlayer:
             prompt_transports=["manual"],
             output_modes=["manual_handoff"],
             executable_path_or_null=None,
+            resume_conformance_suite_or_null=None,
         )
 
 
@@ -417,6 +579,7 @@ def capability_payload(capabilities: PlayerCapabilities) -> dict[str, Any]:
         "prompt_transports": capabilities.prompt_transports,
         "output_modes": capabilities.output_modes,
         "executable_path_or_null": capabilities.executable_path_or_null,
+        "resume_conformance_suite_or_null": capabilities.resume_conformance_suite_or_null,
     }
 
 

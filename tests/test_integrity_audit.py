@@ -899,7 +899,7 @@ class RunAuditTests(unittest.TestCase):
             run_md = run / "run.md"
             run_md.write_text(
                 run_md.read_text(encoding="utf-8").replace(
-                    "- `cross_agent_consensus_version`: `0.14.0`",
+                    "- `cross_agent_consensus_version`: `0.15.0`",
                     "- `cross_agent_consensus_version`: `0.9.2`",
                 ),
                 encoding="utf-8",

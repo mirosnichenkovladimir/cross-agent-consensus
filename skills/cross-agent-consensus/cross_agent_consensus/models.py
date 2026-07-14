@@ -132,6 +132,7 @@ class ResolvedInvocationProfile:
     command: list[str]
     prompt_transport: str
     output_mode: str
+    supports_resume: bool
     env_allowlist: list[str]
 
 
@@ -145,6 +146,7 @@ class PlayerCapabilities:
     prompt_transports: list[str]
     output_modes: list[str]
     executable_path_or_null: str | None
+    resume_conformance_suite_or_null: str | None = None
 
 
 @dataclass
@@ -177,6 +179,13 @@ class AgentInvocation:
     session_id: str
     execution_attempt_id: str | None = None
     retry_safety: str = "read_only"
+    resume_provider_session_entry_id: str | None = None
+    provider_session_id: str | None = None
+    artifact_lineage_root_id: str | None = None
+    continuation_definition_sha256: str | None = None
+    provider_session_definition_resolution: str | None = None
+    execution_profile_supports_resume: bool = False
+    provider_session_resume_reservation_id: str | None = None
     prompt_transport: str = "stdin"
     output_mode: str = "raw_stdout"
     env_allowlist: list[str] = field(default_factory=list)
@@ -255,6 +264,14 @@ class InvocationCommandInput(InvocationReadyInput):
     retry_safety: str | None = None
     approve_ambiguous_retry: bool = False
     operator_identity: str | None = None
+    resume_provider_session_entry_id: str | None = None
+    definition_drift_resolution: str | None = None
+    definition_drift_reference: str | None = None
+    provider_session_id: str | None = None
+    artifact_lineage_root_id: str | None = None
+    continuation_definition_sha256: str | None = None
+    provider_session_definition_resolution: str | None = None
+    execution_profile_supports_resume: bool = False
 
 
 @dataclass

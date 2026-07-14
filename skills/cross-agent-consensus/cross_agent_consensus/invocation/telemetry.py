@@ -188,6 +188,20 @@ def write_invocation_json(paths: AgentSessionPaths, invocation: AgentInvocation)
             "session_id": invocation.session_id,
             "execution_attempt_id_or_null": invocation.execution_attempt_id,
             "retry_safety": invocation.retry_safety,
+            "resume_provider_session_entry_id_or_null": (
+                invocation.resume_provider_session_entry_id
+            ),
+            "provider_session_id_or_null": invocation.provider_session_id,
+            "artifact_lineage_root_id_or_null": invocation.artifact_lineage_root_id,
+            "continuation_definition_sha256_or_null": (
+                invocation.continuation_definition_sha256
+            ),
+            "provider_session_definition_resolution_or_null": (
+                invocation.provider_session_definition_resolution
+            ),
+            "provider_session_resume_reservation_id_or_null": (
+                invocation.provider_session_resume_reservation_id
+            ),
             "prompt_source_path": path_for_json(invocation.prompt_path, invocation.run),
             "prompt_sha256": prompt_sha,
             "raw_output_path": path_for_json(invocation.raw_output_path, invocation.run),

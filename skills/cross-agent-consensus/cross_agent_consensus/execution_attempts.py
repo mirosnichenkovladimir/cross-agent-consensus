@@ -196,6 +196,14 @@ def start_execution_attempt(
             [event for event in events if event.get("event_type") == "execution_attempt_started"]
         ) + 1
         attempt_id = f"attempt-{canonical_json_sha256({'action_id': action_id})[:10]}-{attempt_number:03d}"
+        from cross_agent_consensus.provider_sessions import (
+            append_provider_session_reservation_locked,
+            provider_session_reservation_details_locked,
+        )
+
+        provider_session_reservation = provider_session_reservation_details_locked(
+            run, invocation, attempt_id
+        )
         artifact_id, artifact_sha = _artifact_input(run, records)
         receipt_type, receipt_path = _expected_receipt(run, invocation)
         phase = derive_run_phase(records)
@@ -222,6 +230,9 @@ def start_execution_attempt(
             "retry_safety": retry_safety,
             "ambiguous_retry_operator_approved": bool(approve_ambiguous_retry),
             "ambiguous_retry_operator_identity_or_null": ambiguous_retry_operator_identity,
+            "provider_session_resume_reservation_id_or_null": (
+                invocation.provider_session_resume_reservation_id
+            ),
         }
         append_run_event_locked(
             run,
@@ -231,6 +242,10 @@ def start_execution_attempt(
             phase_after=phase,
             details=details,
         )
+        if provider_session_reservation is not None:
+            append_provider_session_reservation_locked(
+                run, invocation, provider_session_reservation, phase
+            )
     return attempt_id
 
 

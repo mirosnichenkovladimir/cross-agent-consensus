@@ -57,7 +57,7 @@ execution_profiles:
       - "-"
     prompt_transport: stdin
     output_mode: stream_json
-    supports_resume: false
+    supports_resume: true
     env: []
   claude-reviewer-default:
     adapter: claude-cli
@@ -70,7 +70,7 @@ execution_profiles:
       - --include-partial-messages
     prompt_transport: stdin
     output_mode: stream_json
-    supports_resume: false
+    supports_resume: true
     env: []
 participant_identities:
   codex-orchestrator:

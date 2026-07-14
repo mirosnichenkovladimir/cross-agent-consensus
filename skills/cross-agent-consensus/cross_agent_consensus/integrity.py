@@ -122,6 +122,8 @@ def _approval_covers_session(
     working_directory: str,
     artifact_version_id: str | None,
     artifact_sha256: str | None,
+    resume_provider_session_entry_id: str | None = None,
+    provider_session_id: str | None = None,
 ) -> bool:
     session_binding = {
         "participant_identity": participant_identity,
@@ -134,6 +136,8 @@ def _approval_covers_session(
         "working_directory": working_directory,
         "artifact_version_id_or_null": artifact_version_id,
         "artifact_sha256_or_null": artifact_sha256,
+        "resume_provider_session_entry_id_or_null": resume_provider_session_entry_id,
+        "provider_session_id_or_null": provider_session_id,
     }
     if participant_profile_id is not None:
         session_binding["participant_profile_id"] = participant_profile_id
@@ -330,6 +334,17 @@ def live_session_messages(
         working_directory=session_cwd,
         artifact_version_id=artifact_version_id,
         artifact_sha256=artifact_sha256,
+        resume_provider_session_entry_id=(
+            str(invocation.get("resume_provider_session_entry_id_or_null"))
+            if invocation.get("resume_provider_session_entry_id_or_null")
+            else None
+        ),
+        provider_session_id=(
+            str(invocation.get("provider_session_id_or_null"))
+            if invocation.get("resume_provider_session_entry_id_or_null")
+            and invocation.get("provider_session_id_or_null")
+            else None
+        ),
     ):
         messages.append(f"{prefix}: no exact-input OperatorApproval covers the supervised session")
     return messages

@@ -502,6 +502,244 @@ def execution_attempt_event_messages(events: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def provider_session_event_messages(events: list[dict[str, Any]]) -> list[str]:
+    """Verify provider-session ownership, predecessor links, and attempt binding."""
+
+    messages: list[str] = []
+    attempts: dict[str, dict[str, Any]] = {}
+    attempt_states: dict[str, str] = {}
+    captured_attempts: set[str] = set()
+    sessions: dict[str, dict[str, Any]] = {}
+    successors: dict[str, list[str]] = {}
+    reservations: dict[str, dict[str, Any]] = {}
+    reservations_by_predecessor: dict[str, list[str]] = {}
+    consumed_reservations: set[str] = set()
+    provider_owners: dict[str, str] = {}
+    required_fields = {
+        "provider_session_entry_id",
+        "provider_session_id",
+        "run_id",
+        "cac_session_id",
+        "execution_attempt_id",
+        "participant_identity",
+        "participant_profile_id",
+        "execution_profile_id",
+        "player_id",
+        "phase",
+        "round_id",
+        "continuation_definition_sha256",
+        "package_version",
+        "effective_command_sha256",
+        "prompt_sha256",
+    }
+    sha_fields = {
+        "continuation_definition_sha256",
+        "effective_command_sha256",
+        "prompt_sha256",
+    }
+    for event in events:
+        details = event.get("details")
+        event_type = event.get("event_type")
+        sequence = event.get("sequence")
+        if event_type == "execution_attempt_started" and isinstance(details, dict):
+            attempt_id = details.get("attempt_id")
+            if isinstance(attempt_id, str):
+                attempts[attempt_id] = details
+                attempt_states[attempt_id] = "started"
+            continue
+        if event_type in {
+            "execution_attempt_ambiguous",
+            "execution_attempt_failed",
+            "execution_attempt_completed",
+            } and isinstance(details, dict):
+            attempt_id = details.get("attempt_id")
+            if isinstance(attempt_id, str):
+                attempt_states[attempt_id] = str(event_type).removeprefix(
+                    "execution_attempt_"
+                )
+            continue
+        if event_type == "provider_session_resume_reserved":
+            if not isinstance(details, dict):
+                messages.append(
+                    f"events.jsonl:{sequence}: provider resume reservation details must be an object"
+                )
+                continue
+            reservation_id = details.get("provider_session_resume_reservation_id")
+            attempt_id = details.get("execution_attempt_id")
+            predecessor_id = details.get("predecessor_provider_session_entry_id")
+            if not all(
+                isinstance(value, str) and value
+                for value in (reservation_id, attempt_id, predecessor_id)
+            ):
+                messages.append(
+                    f"events.jsonl:{sequence}: provider resume reservation identifiers are required"
+                )
+                continue
+            reservation_id = str(reservation_id)
+            attempt_id = str(attempt_id)
+            predecessor_id = str(predecessor_id)
+            if reservation_id in reservations:
+                messages.append(
+                    f"events.jsonl:{sequence}: duplicate provider resume reservation {reservation_id}"
+                )
+            if attempt_states.get(attempt_id) != "started":
+                messages.append(
+                    f"events.jsonl:{sequence}: provider resume reservation requires a started "
+                    f"execution attempt, got {attempt_states.get(attempt_id)!r}"
+                )
+            predecessor = sessions.get(predecessor_id)
+            if predecessor is None:
+                messages.append(
+                    f"events.jsonl:{sequence}: provider resume reservation predecessor "
+                    f"{predecessor_id!r} must be an earlier capture"
+                )
+            else:
+                for field in {
+                    "provider_session_id",
+                    "participant_identity",
+                    "participant_profile_id",
+                    "execution_profile_id",
+                    "player_id",
+                    "phase",
+                    "artifact_lineage_root_id_or_null",
+                }:
+                    if predecessor.get(field) != details.get(field):
+                        messages.append(
+                            f"events.jsonl:{sequence}: provider resume reservation changes {field}"
+                        )
+            reservations[reservation_id] = details
+            reservations_by_predecessor.setdefault(predecessor_id, []).append(
+                reservation_id
+            )
+            continue
+        if event_type != "provider_session_captured":
+            continue
+        if not isinstance(details, dict):
+            messages.append(f"events.jsonl:{sequence}: provider-session details must be an object")
+            continue
+        missing = sorted(field for field in required_fields if not details.get(field))
+        if missing:
+            messages.append(
+                f"events.jsonl:{sequence}: provider-session fields are required: {', '.join(missing)}"
+            )
+            continue
+        entry_id = str(details["provider_session_entry_id"])
+        if entry_id in sessions:
+            messages.append(f"events.jsonl:{sequence}: duplicate provider session entry {entry_id}")
+            continue
+        for field in sha_fields:
+            value = details.get(field)
+            if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                messages.append(f"events.jsonl:{sequence}: {field} must be a sha256 digest")
+        attempt = attempts.get(str(details["execution_attempt_id"]))
+        if attempt is None:
+            messages.append(
+                f"events.jsonl:{sequence}: provider session references unknown execution attempt "
+                f"{details['execution_attempt_id']}"
+            )
+        else:
+            attempt_id = str(details["execution_attempt_id"])
+            if attempt_states.get(attempt_id) != "started":
+                messages.append(
+                    f"events.jsonl:{sequence}: provider session must be captured while execution "
+                    f"attempt {attempt_id} is started, got {attempt_states.get(attempt_id)!r}"
+                )
+            if attempt_id in captured_attempts:
+                messages.append(
+                    f"events.jsonl:{sequence}: execution attempt {attempt_id} has multiple provider captures"
+                )
+            captured_attempts.add(attempt_id)
+            attempt_pairs = {
+                "session_id": "cac_session_id",
+                "participant_identity": "participant_identity",
+                "participant_profile_id": "participant_profile_id",
+                "execution_profile_id": "execution_profile_id",
+                "player_id": "player_id",
+                "phase": "phase",
+                "round_id": "round_id",
+            }
+            for attempt_field, provider_field in attempt_pairs.items():
+                if attempt.get(attempt_field) != details.get(provider_field):
+                    messages.append(
+                        f"events.jsonl:{sequence}: provider session {provider_field} differs from execution attempt"
+                    )
+        predecessor_id = details.get("predecessor_provider_session_entry_id_or_null")
+        if predecessor_id is not None:
+            successors.setdefault(str(predecessor_id), []).append(entry_id)
+            reservation_id = details.get(
+                "provider_session_resume_reservation_id_or_null"
+            )
+            reservation = reservations.get(str(reservation_id))
+            if reservation is None:
+                messages.append(
+                    f"events.jsonl:{sequence}: resumed provider capture requires an earlier reservation"
+                )
+            else:
+                if reservation.get("execution_attempt_id") != details.get(
+                    "execution_attempt_id"
+                ) or reservation.get(
+                    "predecessor_provider_session_entry_id"
+                ) != predecessor_id:
+                    messages.append(
+                        f"events.jsonl:{sequence}: provider resume reservation does not match capture"
+                    )
+                if str(reservation_id) in consumed_reservations:
+                    messages.append(
+                        f"events.jsonl:{sequence}: provider resume reservation {reservation_id} "
+                        "is consumed more than once"
+                    )
+                consumed_reservations.add(str(reservation_id))
+            predecessor = sessions.get(str(predecessor_id))
+            if predecessor is None:
+                messages.append(
+                    f"events.jsonl:{sequence}: provider session predecessor {predecessor_id!r} "
+                    "must be an earlier entry"
+                )
+            else:
+                stable_fields = {
+                    "provider_session_id",
+                    "run_id",
+                    "participant_identity",
+                    "participant_profile_id",
+                    "execution_profile_id",
+                    "player_id",
+                    "phase",
+                    "artifact_lineage_root_id_or_null",
+                }
+                for field in sorted(stable_fields):
+                    if predecessor.get(field) != details.get(field):
+                        messages.append(
+                            f"events.jsonl:{sequence}: resumed provider session changes {field}"
+                        )
+        elif details.get("provider_session_resume_reservation_id_or_null") is not None:
+            messages.append(
+                f"events.jsonl:{sequence}: fresh provider capture cannot consume a resume reservation"
+            )
+        provider_session_id = str(details["provider_session_id"])
+        participant_identity = str(details["participant_identity"])
+        owner = provider_owners.get(provider_session_id)
+        if owner is not None and owner != participant_identity:
+            messages.append(
+                f"events.jsonl:{sequence}: provider session {provider_session_id!r} is shared by "
+                f"ParticipantIdentity {owner!r} and {participant_identity!r}"
+            )
+        provider_owners[provider_session_id] = participant_identity
+        sessions[entry_id] = details
+    for predecessor_id, successor_ids in sorted(successors.items()):
+        if len(successor_ids) > 1:
+            messages.append(
+                f"events.jsonl: provider session predecessor {predecessor_id!r} branches to "
+                + ", ".join(successor_ids)
+            )
+    for predecessor_id, reservation_ids in sorted(reservations_by_predecessor.items()):
+        if len(reservation_ids) > 1:
+            messages.append(
+                f"events.jsonl: provider session predecessor {predecessor_id!r} has multiple "
+                "resume reservations: " + ", ".join(reservation_ids)
+            )
+    return messages
+
+
 def run_event_messages(run: Path) -> list[str]:
     """Return malformed sequence and transition diagnostics."""
 
@@ -601,4 +839,5 @@ def run_event_messages(run: Path) -> list[str]:
             f"{recorded_phase!r} != {final_phase!r}"
         )
     messages.extend(execution_attempt_event_messages(valid_events))
+    messages.extend(provider_session_event_messages(valid_events))
     return messages

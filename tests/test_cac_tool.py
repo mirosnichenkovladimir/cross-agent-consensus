@@ -79,6 +79,7 @@ class ConsensusToolTests(unittest.TestCase):
         output_mode: str,
         env_names: list[str] | None = None,
         profile_instructions: list[str] | None = None,
+        supports_resume: bool = False,
     ) -> Path:
         profile_id = f"{participant_role}-test-profile"
         execution_profile_id = f"{participant_role}-test-execution"
@@ -101,7 +102,7 @@ class ConsensusToolTests(unittest.TestCase):
                             "command": command,
                             "prompt_transport": "stdin",
                             "output_mode": output_mode,
-                            "supports_resume": False,
+                            "supports_resume": supports_resume,
                             "env": env_names or [],
                         }
                     },
@@ -2337,6 +2338,104 @@ class ConsensusToolTests(unittest.TestCase):
             approval_text = (run / "rounds" / "round-001" / "operator-approval.md").read_text(encoding="utf-8")
             self.assertRegex(approval_text, r"execution_profile_sha256_or_null: [0-9a-f]{64}")
 
+    def test_schema_2_resume_checks_fresh_execution_profile_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            command = [
+                "/usr/bin/python3",
+                "tests/fixtures/fake_provider.py",
+                "structured",
+                "-p",
+                "--verbose",
+                "--output-format",
+                "stream-json",
+                "--session-id",
+                "schema-2-provider-thread",
+            ]
+            run = self.init_profiled_run(
+                tmp,
+                participant_identity="reviewer-resume",
+                participant_role="reviewer",
+                adapter="claude-cli",
+                command=command,
+                output_mode="stream_json",
+                supports_resume=True,
+            )
+            prompt = self.write_reviewer_prompt(run, "reviewer-resume")
+            raw_output = (
+                run
+                / "rounds"
+                / "round-001"
+                / "raw"
+                / "reviewers"
+                / "reviewer-resume.out"
+            )
+
+            fresh = self.run_cli(
+                "invoke-agent",
+                "--run",
+                str(run),
+                "--round",
+                "round-1",
+                "--phase",
+                "reviewer",
+                "--actor",
+                "reviewer-resume",
+                "--player",
+                "claude-cli",
+                "--prompt",
+                str(prompt),
+                "--raw-output",
+                str(raw_output),
+                "--approved",
+            )
+            self.assertEqual(fresh.returncode, 0, fresh.stderr + fresh.stdout)
+            journal_events = [
+                json.loads(line)
+                for line in (run / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            capture = next(
+                event
+                for event in journal_events
+                if event["event_type"] == "provider_session_captured"
+            )
+            entry_id = capture["details"]["provider_session_entry_id"]
+
+            resumed = self.run_cli(
+                "invoke-agent",
+                "--run",
+                str(run),
+                "--round",
+                "round-1",
+                "--phase",
+                "reviewer",
+                "--actor",
+                "reviewer-resume",
+                "--player",
+                "claude-cli",
+                "--prompt",
+                str(prompt),
+                "--raw-output",
+                str(raw_output),
+                "--approved",
+                "--resume-provider-session-entry",
+                str(entry_id),
+            )
+
+            self.assertEqual(resumed.returncode, 0, resumed.stderr + resumed.stdout)
+            resumed_command = json.loads(
+                (
+                    run
+                    / "rounds"
+                    / "round-001"
+                    / "agents"
+                    / "reviewer-resume"
+                    / "session-002"
+                    / "command.json"
+                ).read_text(encoding="utf-8")
+            )["argv"]
+            self.assertEqual(resumed_command[-2:], ["--resume", "schema-2-provider-thread"])
+
     def test_validator_identity_is_recorded_and_passes_readiness_with_bound_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
@@ -2710,6 +2809,7 @@ class ConsensusToolTests(unittest.TestCase):
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
             script = (
                 "import json,sys; sys.stdin.read(); "
+                "print(json.dumps({'type':'system','session_id':'claude-test-session'})); "
                 "print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':'draft'}]}})); "
                 "print(json.dumps({'type':'result','subtype':'success','result':'CLAUDE_FINAL'}))"
             )
@@ -2748,11 +2848,20 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual((session / "final-output.md").read_text(encoding="utf-8"), "CLAUDE_FINAL\n")
             events = [json.loads(line) for line in (session / "events.jsonl").read_text(encoding="utf-8").splitlines()]
             agent_events = [event for event in events if event["type"] == "agent_event"]
-            self.assertEqual([event["native_type"] for event in agent_events], ["assistant", "result"])
-            self.assertEqual([event["normalized_type"] for event in agent_events], ["message", "final"])
+            self.assertEqual(
+                [event["native_type"] for event in agent_events],
+                ["system", "assistant", "result"],
+            )
+            self.assertEqual(
+                [event["normalized_type"] for event in agent_events],
+                ["runtime", "message", "final"],
+            )
             agent_log = [json.loads(line) for line in (session / "agent.log").read_text(encoding="utf-8").splitlines()]
-            self.assertEqual([entry["native_type"] for entry in agent_log], ["assistant", "result"])
-            self.assertEqual(agent_log[0]["native_event"]["message"]["content"][0]["text"], "draft")
+            self.assertEqual(
+                [entry["native_type"] for entry in agent_log],
+                ["system", "assistant", "result"],
+            )
+            self.assertEqual(agent_log[1]["native_event"]["message"]["content"][0]["text"], "draft")
 
     def test_claude_cli_player_rejects_stream_json_without_verbose(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -2797,6 +2906,7 @@ class ConsensusToolTests(unittest.TestCase):
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
             script = (
                 "import json,sys; sys.stdin.read(); "
+                "print(json.dumps({'type':'thread.started','thread_id':'codex-test-thread'})); "
                 "print(json.dumps({'msg':{'type':'task_started'}})); "
                 "print(json.dumps({'type':'item.started','item':{'type':'command_execution','status':'in_progress','command':'true'}})); "
                 "print(json.dumps({'type':'item.completed','item':{'type':'command_execution','status':'completed','command':'true','exit_code':0}})); "
@@ -2836,7 +2946,17 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual((session / "final-output.md").read_text(encoding="utf-8"), "CODEX_FINAL\n")
             events = [json.loads(line) for line in (session / "events.jsonl").read_text(encoding="utf-8").splitlines()]
             native_types = [event["native_type"] for event in events if event["type"] == "agent_event"]
-            self.assertEqual(native_types, ["task_started", "item.started", "item.completed", "item.completed", "turn.completed"])
+            self.assertEqual(
+                native_types,
+                [
+                    "thread.started",
+                    "task_started",
+                    "item.started",
+                    "item.completed",
+                    "item.completed",
+                    "turn.completed",
+                ],
+            )
             normalized_types = [event["normalized_type"] for event in events if event["type"] == "agent_event"]
             self.assertIn("tool_call", normalized_types)
             self.assertIn("tool_result", normalized_types)
@@ -2845,7 +2965,14 @@ class ConsensusToolTests(unittest.TestCase):
             agent_log = [json.loads(line) for line in (session / "agent.log").read_text(encoding="utf-8").splitlines()]
             self.assertEqual(
                 [entry["native_type"] for entry in agent_log],
-                ["task_started", "item.started", "item.completed", "item.completed", "turn.completed"],
+                [
+                    "thread.started",
+                    "task_started",
+                    "item.started",
+                    "item.completed",
+                    "item.completed",
+                    "turn.completed",
+                ],
             )
 
     def test_codex_cli_player_rejects_command_without_json(self) -> None:

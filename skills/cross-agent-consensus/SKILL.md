@@ -103,7 +103,8 @@ binds the Participant Identity, Participant Profile, Execution Profile,
 approved prompt, argv, and working directory. A readable local ArtifactVersion
 is bound by its current content digest. Editing the prompt, command, profile
 binding, or artifact invalidates that approval; regenerate the prompt when
-needed and ask for approval again.
+needed and ask for approval again. A resumed invocation also binds its
+`provider_session_entry_id` and provider conversation identifier.
 
 ## M2 Boundary
 
@@ -229,6 +230,22 @@ ambiguous attempt until capture writes and hashes the expected protocol
 receipt. Never retry an unresolved `mutating` or `external_side_effect`
 attempt without an explicit operator decision recorded through
 `--approve-ambiguous-retry --operator-identity <identity>`.
+
+Codex and Claude provider conversations are separate from CAC process sessions.
+`session-NNN` names one supervised process; `provider_session_captured` stores
+the Codex thread ID or Claude session UUID. Resume with
+`invoke-agent --resume-provider-session-entry <entry-id>`. CAC resumes only the
+same ParticipantIdentity, ParticipantProfile role, ExecutionProfile, adapter,
+run, and ArtifactVersion lineage, and only when the selected entry is the
+conversation's latest leaf. Execution Profiles contain fresh argv;
+provider-native resume selectors are invalid unless the adapter constructs
+them from the selected journal entry. The execution attempt atomically reserves
+the selected leaf before provider launch, and provider capture consumes that
+reservation. Existing RunJournal diagnostics block resume. Definition drift requires one
+`--definition-drift-resolution`; accepting a recorded profile, named migration,
+or compatibility rule also requires `--operator-identity`, and named choices
+require `--definition-drift-reference`. Cross-reviewer provider-session reuse
+is invalid even when both reviewers use the same ExecutionProfile.
 
 ## Terse Invocation Behavior
 

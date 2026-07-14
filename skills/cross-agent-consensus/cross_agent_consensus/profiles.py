@@ -230,6 +230,14 @@ def parse_profile_definitions(
             errors.append(
                 f"{prefix}.adapter must use the stable adapter id {capabilities.player_id!r}, not alias {adapter_id!r}"
             )
+        has_native_resume_selector = getattr(
+            adapter, "has_native_resume_selector", lambda _command: False
+        )
+        if has_native_resume_selector(command):
+            errors.append(
+                f"{prefix}.command must be fresh argv; provider-native resume selectors "
+                "are constructed only from --resume-provider-session-entry"
+            )
         if prompt_transport not in capabilities.prompt_transports:
             errors.append(
                 f"{prefix}.prompt_transport {prompt_transport!r} is not supported by {capabilities.player_id}"
@@ -238,6 +246,12 @@ def parse_profile_definitions(
             errors.append(f"{prefix}.output_mode {output_mode!r} is not supported by {capabilities.player_id}")
         if supports_resume and not capabilities.supports_resume:
             errors.append(f"{prefix}.supports_resume is true but adapter {capabilities.player_id} cannot resume")
+        if supports_resume and capabilities.resume_conformance_suite_or_null != (
+            "cross-agent-consensus-provider-conformance-1"
+        ):
+            errors.append(
+                f"{prefix}.supports_resume requires cross-agent-consensus-provider-conformance-1"
+            )
         effective_command, command_setting_errors = effective_execution_command(
             capabilities.player_id,
             command,
@@ -397,12 +411,14 @@ def invocation_profile_from_records(
     command = execution.get("command")
     prompt_transport = execution.get("prompt_transport")
     output_mode = execution.get("output_mode")
+    supports_resume = execution.get("supports_resume")
     env_allowlist = execution.get("env_allowlist")
     if (
         not isinstance(adapter_id, str)
         or not isinstance(command, list)
         or not isinstance(prompt_transport, str)
         or not isinstance(output_mode, str)
+        or not isinstance(supports_resume, bool)
         or not isinstance(env_allowlist, list)
     ):
         return None
@@ -415,6 +431,7 @@ def invocation_profile_from_records(
         command=list(command),
         prompt_transport=prompt_transport,
         output_mode=output_mode,
+        supports_resume=supports_resume,
         env_allowlist=list(env_allowlist),
     )
 
@@ -475,6 +492,9 @@ def bind_recorded_invocation_profile(
             and legacy_adapter.command_requests_json(command)
             else ("manual_handoff" if args.player == "manual" else "raw_stdout")
         )
+        args.execution_profile_supports_resume = legacy_adapter.probe(
+            command
+        ).supports_resume
         # Runs created before schema 2 inherited the complete parent environment.
         # Record the inherited names so command.json describes the compatibility launch.
         args.env_allowlist = sorted(os.environ)
@@ -502,6 +522,7 @@ def bind_recorded_invocation_profile(
     args.execution_profile_id = profile.execution_profile_id
     args.prompt_transport = profile.prompt_transport
     args.output_mode = profile.output_mode
+    args.execution_profile_supports_resume = profile.supports_resume
     args.env_allowlist = profile.env_allowlist
     errors.extend(
         participant_phase_role_errors(
