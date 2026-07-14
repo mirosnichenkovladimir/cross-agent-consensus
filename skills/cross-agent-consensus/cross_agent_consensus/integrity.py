@@ -459,6 +459,19 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
         )
 
     for record in records_by_type(records, "OperatorApproval"):
+        checkpoint_id = record.data.get("checkpoint_id")
+        checkpoint_sha256 = record.data.get("checkpoint_input_sha256")
+        if checkpoint_id is not None or checkpoint_sha256 is not None:
+            if not isinstance(checkpoint_id, str) or not checkpoint_id:
+                messages.append(
+                    f"{record.path}:{record.heading_line}: bounded checkpoint id is missing"
+                )
+            if not isinstance(checkpoint_sha256, str) or not SHA256_RE.fullmatch(
+                checkpoint_sha256
+            ):
+                messages.append(
+                    f"{record.path}:{record.heading_line}: bounded checkpoint input sha256 is invalid"
+                )
         bindings = record.data.get("approved_invocations")
         if bindings is None:
             continue

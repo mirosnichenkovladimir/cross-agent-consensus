@@ -315,6 +315,8 @@ def _launch_all(
     *,
     plans: list[ActorPlan],
     sequential: bool,
+    checkpoint_id: str | None = None,
+    checkpoint_input_sha256: str | None = None,
 ) -> dict[str, int]:
     """Invoke ``cmd_invoke_agent`` for every plan; collect per-actor exit codes.
 
@@ -339,6 +341,8 @@ def _launch_all(
             heartbeat_interval_seconds=plan.heartbeat_interval_seconds,
             command=list(plan.runtime_command),
             require_existing_approval=True,
+            checkpoint_id=checkpoint_id,
+            checkpoint_input_sha256=checkpoint_input_sha256,
         )
         try:
             rc = process_monitor.cmd_invoke_agent(invoke_args)
@@ -563,6 +567,28 @@ def cmd_run(args: RunCommandInput) -> int:
     # Refresh records — prompt finalization may have written batch / artifact changes
     records = parse_run_records(run)
 
+    checkpoint_id = getattr(args, "checkpoint_id", None)
+    checkpoint_input_sha256 = getattr(args, "checkpoint_input_sha256", None)
+    if checkpoint_id is not None or checkpoint_input_sha256 is not None:
+        if not checkpoint_id or not checkpoint_input_sha256:
+            eprint("error: incomplete bounded-remediation checkpoint binding")
+            return 3
+        from cross_agent_consensus.bounded_remediation import (
+            derive_bounded_remediation_plan,
+        )
+
+        current_checkpoint = derive_bounded_remediation_plan(run)
+        if (
+            current_checkpoint.checkpoint_id_or_null != checkpoint_id
+            or current_checkpoint.checkpoint_input_sha256
+            != checkpoint_input_sha256
+        ):
+            eprint(
+                "error: bounded-remediation checkpoint changed after prompt finalization; "
+                "rerun remediate --json"
+            )
+            return 3
+
     # Step 3 — readiness per actor
     blockers = _run_readiness(run, plans=plans)
     has_blocker = any(messages for messages in blockers.values())
@@ -612,6 +638,8 @@ def cmd_run(args: RunCommandInput) -> int:
                 command=plan.runtime_command,
                 artifact_version_id=plan.artifact_version_id,
                 working_directory=plan.cwd,
+                checkpoint_id=checkpoint_id,
+                checkpoint_input_sha256=checkpoint_input_sha256,
             )
             for plan in plans
         ]
@@ -622,6 +650,10 @@ def cmd_run(args: RunCommandInput) -> int:
             bindings=bindings,
             mechanism=mechanism,
             operator_identity=operator_identity,
+            checkpoint_id=getattr(args, "checkpoint_id", None),
+            checkpoint_input_sha256=getattr(
+                args, "checkpoint_input_sha256", None
+            ),
         )
     except ValueError as exc:
         eprint(f"error: approval binding failed: {exc}")
@@ -629,7 +661,13 @@ def cmd_run(args: RunCommandInput) -> int:
     print(f"stamped OperatorApproval ({mechanism}): {approval_path}")
 
     # Steps 4–6 — launch + capture
-    invoke_rcs = _launch_all(run, plans=plans, sequential=bool(getattr(args, "sequential", False)))
+    invoke_rcs = _launch_all(
+        run,
+        plans=plans,
+        sequential=bool(getattr(args, "sequential", False)),
+        checkpoint_id=checkpoint_id,
+        checkpoint_input_sha256=checkpoint_input_sha256,
+    )
     capture_rcs = _capture_all(run, plans=plans, exit_codes=invoke_rcs)
 
     overall = _summarize_results(plans, invoke_rcs=invoke_rcs, capture_rcs=capture_rcs)

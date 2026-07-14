@@ -125,6 +125,26 @@ class NextActionPlan:
 
 
 @dataclass(frozen=True)
+class BoundedRemediationPlan:
+    schema_version: str
+    run_id: str
+    phase: str
+    plan_status: str
+    terminal_status: str
+    record_journal_sha256: str
+    checkpoint_id_or_null: str | None
+    checkpoint_input_sha256: str
+    checkpoint_status: str
+    dispatch_phase_or_null: str | None
+    round_id_or_null: str | None
+    participant_identities: tuple[str, ...]
+    execution_allowed: bool
+    publication_authorized: bool
+    blockers: tuple[str, ...]
+    required_records: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ResolvedInvocationProfile:
     participant_profile_id: str
     execution_profile_id: str
@@ -272,6 +292,8 @@ class InvocationCommandInput(InvocationReadyInput):
     continuation_definition_sha256: str | None = None
     provider_session_definition_resolution: str | None = None
     execution_profile_supports_resume: bool = False
+    checkpoint_id: str | None = None
+    checkpoint_input_sha256: str | None = None
 
 
 @dataclass
@@ -288,3 +310,5 @@ class RunCommandInput:
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
     operator_identity: str | None
+    checkpoint_id: str | None = None
+    checkpoint_input_sha256: str | None = None

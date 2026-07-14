@@ -231,3 +231,25 @@ untracked path inventory, and every untracked file's exact bytes. Supplying
 Git reads before publication and aborts if the index, worktree, refs, or
 untracked bytes changed. The resulting ArtifactVersion references
 `snapshots/git-change-*/manifest.json` and records the full snapshot digest.
+
+## Bounded remediation profile
+
+`Policy.profile: bounded-remediation` opts one run into deterministic
+single-transition dispatch:
+
+```bash
+scripts/consensus remediate --run <run> --json
+scripts/consensus remediate --run <run> --execute --approved \
+  --operator-identity <identity> \
+  --checkpoint-id <checkpoint_id_or_null> \
+  --checkpoint-input-sha256 <checkpoint_input_sha256>
+```
+
+The second command dispatches at most one Author, Reviewer, or Validator phase.
+Its `OperatorApproval` binds `checkpoint_id` and
+`checkpoint_input_sha256` in addition to the prompt, argv, ExecutionProfile,
+ArtifactVersion, and working-directory digests. A changed finding set,
+ArtifactVersion, validator record, or RunJournal leaf makes the checkpoint
+stale. `document-consensus` is not eligible for this command.
+The execute form recomputes the checkpoint after prompt finalization and aborts
+before readiness or session allocation when either supplied value changed.

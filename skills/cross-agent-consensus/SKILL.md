@@ -127,6 +127,7 @@ When `scripts/consensus` is present in the installed skill package, prefer it fo
 - run `scripts/consensus capture` after command/manual output to preserve raw evidence in the run folder;
 - run `scripts/consensus status` before remediation loops to inspect ReReviewDecision attempt counts and agent session accounting;
 - run `scripts/consensus next --run <run> --json` to derive the next action from validated run records and the RunJournal without launching a participant or writing a run file;
+- for `Policy.profile: bounded-remediation`, run `scripts/consensus remediate --run <run> --json` to bind that plan to one restartable transition; execute only an `actionable` plan and pass its exact `checkpoint_id_or_null` and `checkpoint_input_sha256` with `--execute --approved --operator-identity <identity>`;
 - run `scripts/consensus validate --terminal` and `scripts/consensus terminate` before making a terminal consensus claim.
 
 In `NextActionPlan`, an `invoke-<participant>-reviewer` action means the bounded

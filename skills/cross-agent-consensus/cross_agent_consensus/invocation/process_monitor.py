@@ -588,6 +588,10 @@ def exact_invocation_approval(
             working_directory=args.cwd,
             resume_provider_session_entry_id=args.resume_provider_session_entry_id,
             provider_session_id=getattr(args, "provider_session_id", None),
+            checkpoint_id=getattr(args, "checkpoint_id", None),
+            checkpoint_input_sha256=getattr(
+                args, "checkpoint_input_sha256", None
+            ),
         )
     return ensure_invocation_approval(
         Path(args.run),
@@ -602,6 +606,8 @@ def exact_invocation_approval(
         working_directory=args.cwd,
         resume_provider_session_entry_id=args.resume_provider_session_entry_id,
         provider_session_id=getattr(args, "provider_session_id", None),
+        checkpoint_id=getattr(args, "checkpoint_id", None),
+        checkpoint_input_sha256=getattr(args, "checkpoint_input_sha256", None),
         mechanism="cli_approved_flag" if args.approved else "policy_unattended",
     )
 

@@ -74,6 +74,12 @@ def _identifier_token(value: str) -> str:
     return f"{slug}-{digest}"
 
 
+def action_identifier_token(value: str) -> str:
+    """Return the stable identity token used in deterministic action IDs."""
+
+    return _identifier_token(value)
+
+
 def _record_input(record: Record) -> dict[str, Any]:
     return {
         "record_type": record.record_type,

@@ -354,6 +354,8 @@ OPTIONAL_FIELD_TYPES: dict[str, tuple[type[object], ...]] = {
     "git_change_snapshot_sha256": (str,),
     "approval_binding_version": (str,),
     "approved_invocations": (list,),
+    "checkpoint_id": (str,),
+    "checkpoint_input_sha256": (str,),
     "resolved_participant_identities": (dict,),
     "resolved_execution_profiles": (dict,),
     "validator_identities": (list,),

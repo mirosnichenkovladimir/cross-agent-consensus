@@ -595,6 +595,37 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(m_invoke.call_count, 0)
         self.assertEqual(m_capture.call_count, 0)
 
+    def test_changed_bounded_checkpoint_aborts_before_readiness_or_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _stage_run(Path(tmp_name), reviewers=["codex"])
+            args = _run_args(
+                run,
+                checkpoint_id="bounded-remediation-reviewer",
+                checkpoint_input_sha256="1" * 64,
+            )
+            current = argparse.Namespace(
+                checkpoint_id_or_null="bounded-remediation-reviewer",
+                checkpoint_input_sha256="2" * 64,
+            )
+            with (
+                mock.patch(
+                    "cross_agent_consensus.bounded_remediation.derive_bounded_remediation_plan",
+                    return_value=current,
+                ),
+                mock.patch(
+                    "cross_agent_consensus.run_macro._run_readiness"
+                ) as readiness,
+                mock.patch(
+                    "cross_agent_consensus.run_macro._launch_all"
+                ) as launch,
+            ):
+                rc, _stdout, stderr = _capture_run(args)
+
+        self.assertEqual(rc, 3)
+        self.assertIn("checkpoint changed after prompt finalization", stderr)
+        readiness.assert_not_called()
+        launch.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -64,6 +64,8 @@ def approval_binding(
     working_directory: str | Path | None = None,
     resume_provider_session_entry_id: str | None = None,
     provider_session_id: str | None = None,
+    checkpoint_id: str | None = None,
+    checkpoint_input_sha256: str | None = None,
 ) -> dict[str, Any]:
     if not prompt_path.is_file():
         raise ValueError(f"approval prompt not found: {prompt_path}")
@@ -78,7 +80,7 @@ def approval_binding(
             raise ValueError(
                 f"approval artifact content cannot be resolved for hashing: {artifact_id}"
             )
-    return {
+    binding = {
         "participant_identity": participant_identity,
         "participant_profile_id": participant_profile_id,
         "execution_profile_id": execution_profile_id,
@@ -97,6 +99,14 @@ def approval_binding(
         "resume_provider_session_entry_id_or_null": resume_provider_session_entry_id,
         "provider_session_id_or_null": provider_session_id,
     }
+    if checkpoint_id is not None or checkpoint_input_sha256 is not None:
+        if not checkpoint_id or not checkpoint_input_sha256:
+            raise ValueError(
+                "invocation checkpoint requires both checkpoint_id and checkpoint_input_sha256"
+            )
+        binding["checkpoint_id_or_null"] = checkpoint_id
+        binding["checkpoint_input_sha256_or_null"] = checkpoint_input_sha256
+    return binding
 
 
 def _approval_data(
@@ -109,9 +119,11 @@ def _approval_data(
     mechanism: str,
     operator_identity: str | None,
     created_at: str,
+    checkpoint_id: str | None = None,
+    checkpoint_input_sha256: str | None = None,
 ) -> dict[str, Any]:
     actors = [str(binding["participant_identity"]) for binding in bindings]
-    return {
+    data = {
         "record_type": "OperatorApproval",
         "schema_version": "m2-markdown-2",
         "run_id": run_id,
@@ -127,6 +139,14 @@ def _approval_data(
         "approval_binding_version": "exact-inputs-2",
         "approved_invocations": bindings,
     }
+    if checkpoint_id is not None or checkpoint_input_sha256 is not None:
+        if not checkpoint_id or not checkpoint_input_sha256:
+            raise ValueError(
+                "bounded remediation checkpoint requires both checkpoint_id and checkpoint_input_sha256"
+            )
+        data["checkpoint_id"] = checkpoint_id
+        data["checkpoint_input_sha256"] = checkpoint_input_sha256
+    return data
 
 
 def _approval_text(record_id: str, data: dict[str, Any]) -> str:
@@ -156,6 +176,8 @@ def _binding_key(binding: dict[str, Any]) -> tuple[Any, ...]:
         binding.get("artifact_sha256_or_null"),
         binding.get("resume_provider_session_entry_id_or_null"),
         binding.get("provider_session_id_or_null"),
+        binding.get("checkpoint_id_or_null"),
+        binding.get("checkpoint_input_sha256_or_null"),
     )
 
 
@@ -208,6 +230,8 @@ def stamp_operator_approval(
     bindings: list[dict[str, Any]],
     mechanism: str,
     operator_identity: str | None,
+    checkpoint_id: str | None = None,
+    checkpoint_input_sha256: str | None = None,
 ) -> Path:
     """Append one approval record while serializing mutations for ``run``."""
 
@@ -230,6 +254,8 @@ def stamp_operator_approval(
             mechanism=mechanism,
             operator_identity=operator_identity,
             created_at=created_at,
+            checkpoint_id=checkpoint_id,
+            checkpoint_input_sha256=checkpoint_input_sha256,
         )
         text = _approval_text(record_id, data)
         if target.exists():
@@ -248,6 +274,8 @@ def stamp_operator_approval(
                 "round": normalize_round_id(round_id),
                 "phase": phase,
                 "approved_actors": [binding["participant_identity"] for binding in bindings],
+                "checkpoint_id_or_null": checkpoint_id,
+                "checkpoint_input_sha256_or_null": checkpoint_input_sha256,
                 "operator_approval_sha256": canonical_json_sha256(data),
             },
         )
@@ -269,6 +297,8 @@ def ensure_invocation_approval(
     working_directory: str | Path | None = None,
     resume_provider_session_entry_id: str | None = None,
     provider_session_id: str | None = None,
+    checkpoint_id: str | None = None,
+    checkpoint_input_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Return an exact binding, recording it when no identical approval exists."""
 
@@ -287,6 +317,8 @@ def ensure_invocation_approval(
         working_directory=working_directory,
         resume_provider_session_entry_id=resume_provider_session_entry_id,
         provider_session_id=provider_session_id,
+        checkpoint_id=checkpoint_id,
+        checkpoint_input_sha256=checkpoint_input_sha256,
     )
     if not approval_binding_exists(records, binding):
         stamp_operator_approval(
@@ -314,6 +346,8 @@ def verify_invocation_approval(
     working_directory: str | Path | None = None,
     resume_provider_session_entry_id: str | None = None,
     provider_session_id: str | None = None,
+    checkpoint_id: str | None = None,
+    checkpoint_input_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Require a previously recorded binding for the invocation's current inputs."""
 
@@ -332,6 +366,8 @@ def verify_invocation_approval(
         working_directory=working_directory,
         resume_provider_session_entry_id=resume_provider_session_entry_id,
         provider_session_id=provider_session_id,
+        checkpoint_id=checkpoint_id,
+        checkpoint_input_sha256=checkpoint_input_sha256,
     )
     approval_record = approval_record_for_binding(records, binding)
     if approval_record is None:
@@ -342,4 +378,17 @@ def verify_invocation_approval(
     anchor_messages = approval_anchor_messages(run, records, [approval_record])
     if anchor_messages:
         raise ValueError("OperatorApproval integrity failed: " + "; ".join(anchor_messages))
+    if checkpoint_id is not None or checkpoint_input_sha256 is not None:
+        if not checkpoint_id or not checkpoint_input_sha256:
+            raise ValueError("bounded-remediation checkpoint binding is incomplete")
+        from cross_agent_consensus.bounded_remediation import (
+            assert_bounded_checkpoint_reservation_current,
+        )
+
+        assert_bounded_checkpoint_reservation_current(
+            run,
+            checkpoint_id,
+            checkpoint_input_sha256,
+            approval_record.record_id,
+        )
     return binding

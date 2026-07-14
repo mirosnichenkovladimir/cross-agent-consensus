@@ -47,6 +47,7 @@ from cross_agent_consensus.config import (
     validate_config_shape,
 )
 from cross_agent_consensus.capture import cmd_capture
+from cross_agent_consensus.bounded_remediation import cmd_remediate
 from cross_agent_consensus.draft_promotion import cmd_promote_draft
 from cross_agent_consensus.git_snapshot import cmd_snapshot_git
 from cross_agent_consensus.prompt_command import (
@@ -1093,6 +1094,32 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_run_arg(next_action)
     next_action.add_argument("--json", action="store_true", help="Print byte-stable NextActionPlan JSON.")
     next_action.set_defaults(func=cmd_next)
+
+    remediate = sub.add_parser(
+        "remediate",
+        help="Derive or dispatch one bounded-remediation profile transition.",
+    )
+    add_common_run_arg(remediate)
+    remediate.add_argument("--json", action="store_true")
+    remediate.add_argument("--execute", action="store_true")
+    remediate.add_argument("--approved", action="store_true")
+    remediate.add_argument("--operator-identity")
+    remediate.add_argument("--checkpoint-id")
+    remediate.add_argument("--checkpoint-input-sha256")
+    remediate.add_argument("--sequential", action="store_true")
+    remediate.add_argument("--cwd", default=".")
+    remediate.add_argument(
+        "--idle-timeout-seconds", type=float, default=DEFAULT_IDLE_TIMEOUT_SECONDS
+    )
+    remediate.add_argument(
+        "--stale-timeout-seconds", type=float, default=DEFAULT_STALE_TIMEOUT_SECONDS
+    )
+    remediate.add_argument(
+        "--heartbeat-interval-seconds",
+        type=float,
+        default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    )
+    remediate.set_defaults(func=cmd_remediate)
 
     validate = sub.add_parser("validate", help="Run deterministic conformance checks.")
     add_common_run_arg(validate)

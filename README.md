@@ -28,7 +28,7 @@ Install the manual `cross-agent-consensus` skill package with the terse `cac` in
 ./scripts/install-cac --target all --update
 ```
 
-The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.16.0 promotes content-only worker drafts through CAC-owned finalizers and binds code-review invocations to immutable Git change snapshots. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
+The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.17.0 adds the opt-in `bounded-remediation` profile: `consensus remediate` maps the current `NextActionPlan` to one checkpoint-bound Author, Reviewer, or Validator transition. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
 
 Trigger examples after install:
 
@@ -54,6 +54,9 @@ When `skills/cross-agent-consensus/scripts/consensus` is available, use it for d
 - `snapshot-git` captures resolved revisions, staged/unstaged/target binary
   patches, and exact untracked bytes into a content-addressed snapshot, then
   creates the bound `ArtifactVersion`.
+- `remediate --json` returns a byte-stable `BoundedRemediationPlan` for an
+  opt-in `bounded-remediation` Policy. `--execute --approved` dispatches at
+  most one phase and binds the plan-input digest to `OperatorApproval`.
 - `validate --integrity` recomputes recorded artifact, prompt, and evidence
   digests; `validate --run-events` checks the hash-chained mutation journal and
   `.cac-events-anchor.json` against deletion, edits, and suffix truncation.

@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.17.0] - 2026-07-14
+
+### Added
+- `consensus remediate --json` derives a byte-stable
+  `BoundedRemediationPlan` from the validated `NextActionPlan` for an opt-in
+  `Policy.profile: bounded-remediation` run.
+- `consensus remediate --execute --approved --operator-identity <identity>`
+  dispatches at most one Author, Reviewer, or Validator phase through the
+  existing prompt, readiness, approval, invocation, and capture commands.
+
+### Changed
+- Bounded-profile `OperatorApproval` records bind a checkpoint identifier and
+  the digest of phase, runnable actions, required records, pending choices, and
+  the RunJournal leaf shown to the operator.
+- Semantic normalization, AuthorResponse, ReReviewDecision, HumanDecision,
+  escalation, and terminal records remain explicit stop points. The bounded
+  dispatcher never converts provider verdict prose into lifecycle state.
+
+### Fixed
+- A changed finding set, ArtifactVersion, validator record, or RunJournal leaf
+  marks an older bounded-profile checkpoint stale. Execution requires the
+  displayed checkpoint values and recomputes them after prompt finalization,
+  before readiness or session allocation.
+- Ambiguous-retry and human-decision waits cannot dispatch. A waiting Reviewer
+  plan may proceed only when every pending choice is the ordinary exact-input
+  approval returned by the caller. Partial review and validation phases select
+  one ParticipantIdentity whose executable receipt remains missing.
+- The approval append is treated as a bounded-transition reservation. Exact
+  approval verification reconstructs the pre-approval plan digest immediately
+  before session allocation; any intervening record or RunJournal entry aborts
+  the launch.
+- `document-consensus` cannot enter the new dispatcher, and no M6 publication
+  command exists without a separate exact-input Policy and approval contract.
+
 ## [0.16.0] - 2026-07-14
 
 ### Added
