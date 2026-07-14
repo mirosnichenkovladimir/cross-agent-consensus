@@ -419,11 +419,31 @@ def setup_target_path(args: argparse.Namespace) -> Path:
 
 
 def setup_config_payload() -> dict[str, Any]:
-    reviewer_clis: dict[str, Any] = {}
+    execution_profiles: dict[str, Any] = {
+        "manual-default": {
+            "adapter": "manual",
+            "command": [],
+            "prompt_transport": "manual",
+            "output_mode": "manual_handoff",
+            "supports_resume": False,
+            "env": [],
+        }
+    }
+    participant_identities: dict[str, Any] = {
+        "orchestrator-codex-default": {
+            "participant_profile_id": "orchestrator-default",
+            "execution_profile_id": "manual-default",
+        },
+        "codex-implementer": {
+            "participant_profile_id": "author-default",
+            "execution_profile_id": "manual-default",
+        },
+    }
     reviewers: list[str] = []
     if shutil.which("claude"):
         reviewers.append("claude-reviewer")
-        reviewer_clis["claude-reviewer"] = {
+        execution_profiles["claude-reviewer-default"] = {
+            "adapter": "claude-cli",
             "command": [
                 "claude",
                 "-p",
@@ -436,16 +456,33 @@ def setup_config_payload() -> dict[str, Any]:
                 "--no-session-persistence",
             ],
             "prompt_transport": "stdin",
-            "stdout_capture": "raw_output",
-            "stderr_capture": "raw_error",
+            "output_mode": "stream_json",
+            "supports_resume": False,
+            "env": [
+                "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "CLAUDE_CONFIG_DIR",
+                "ANTHROPIC_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+            ],
+        }
+        participant_identities["claude-reviewer"] = {
+            "participant_profile_id": "reviewer-default",
+            "execution_profile_id": "claude-reviewer-default",
         }
     if shutil.which("codex"):
         reviewers.append("codex-independent-reviewer")
-        reviewer_clis["codex-independent-reviewer"] = {
+        execution_profiles["codex-reviewer-default"] = {
+            "adapter": "codex-cli",
             "command": ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
             "prompt_transport": "stdin",
-            "stdout_capture": "raw_output",
-            "stderr_capture": "raw_error",
+            "output_mode": "stream_json",
+            "supports_resume": False,
+            "env": [
+                "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME",
+                "OPENAI_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+            ],
+        }
+        participant_identities["codex-independent-reviewer"] = {
+            "participant_profile_id": "reviewer-default",
+            "execution_profile_id": "codex-reviewer-default",
         }
     data: dict[str, Any] = {
         "schema_version": CONFIG_SCHEMA_VERSION,
@@ -462,8 +499,33 @@ def setup_config_payload() -> dict[str, Any]:
             "orchestrator": "orchestrator-codex-default",
             "author": "codex-implementer",
             "reviewers": reviewers,
+            "validators": [],
             "human_supervisor": "none",
         },
+        "participant_profiles": {
+            "orchestrator-default": {
+                "role": "orchestrator",
+                "instructions": ["enforce CAC policy and preserve protocol evidence"],
+            },
+            "author-default": {
+                "role": "author",
+                "instructions": ["produce the requested artifact and respond to material findings"],
+            },
+            "reviewer-default": {
+                "role": "reviewer",
+                "instructions": ["review the declared artifact and emit evidence-backed findings"],
+            },
+            "validator-default": {
+                "role": "validator",
+                "instructions": ["produce deterministic validation evidence"],
+            },
+            "human-supervisor-default": {
+                "role": "human_supervisor",
+                "instructions": ["resolve escalations and binding decisions"],
+            },
+        },
+        "execution_profiles": execution_profiles,
+        "participant_identities": participant_identities,
         "invocation": {
             "require_invocation_ready": True,
             "direct_reviewer_cli": "explicit_only",
@@ -475,8 +537,6 @@ def setup_config_payload() -> dict[str, Any]:
             },
         },
     }
-    if reviewer_clis:
-        data["reviewer_clis"] = reviewer_clis
     return data
 
 
@@ -1052,6 +1112,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_run_arg(ready)
     ready.add_argument("--actor", required=True)
     ready.add_argument("--player", default="generic-cli")
+    ready.add_argument("--participant-profile", dest="participant_profile_id")
+    ready.add_argument("--execution-profile", dest="execution_profile_id")
     ready.add_argument("--prompt", required=True)
     ready.add_argument(
         "--raw-output",
@@ -1110,6 +1172,8 @@ def build_parser() -> argparse.ArgumentParser:
     invoke.add_argument("--phase", required=True, choices=["author", "reviewer", "validator", "manual"])
     invoke.add_argument("--actor", required=True)
     invoke.add_argument("--player", required=True)
+    invoke.add_argument("--participant-profile", dest="participant_profile_id")
+    invoke.add_argument("--execution-profile", dest="execution_profile_id")
     invoke.add_argument("--prompt", required=True)
     invoke.add_argument(
         "--raw-output",

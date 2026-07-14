@@ -11,6 +11,7 @@ from cross_agent_consensus.integrity import (
     approval_anchor_messages,
     canonical_json_sha256,
     command_sha256,
+    resolved_execution_profile_sha256,
     verified_artifact_sha256,
 )
 from cross_agent_consensus.io import append_text, atomic_write_new, sha256_file, slugify, utc_now
@@ -51,7 +52,9 @@ def approval_binding(
     run: Path,
     records: list[Record],
     *,
-    actor_identity: str,
+    participant_identity: str,
+    participant_profile_id: str = "legacy-inline-participant-profile",
+    execution_profile_id: str = "legacy-inline-execution-profile",
     player_id: str,
     phase: str,
     round_id: str,
@@ -74,7 +77,12 @@ def approval_binding(
                 f"approval artifact content cannot be resolved for hashing: {artifact_id}"
             )
     return {
-        "actor_identity": actor_identity,
+        "participant_identity": participant_identity,
+        "participant_profile_id": participant_profile_id,
+        "execution_profile_id": execution_profile_id,
+        "execution_profile_sha256_or_null": resolved_execution_profile_sha256(
+            records, execution_profile_id
+        ),
         "player_id": player_id,
         "phase": phase,
         "round_id": normalize_round_id(round_id),
@@ -98,7 +106,7 @@ def _approval_data(
     operator_identity: str | None,
     created_at: str,
 ) -> dict[str, Any]:
-    actors = [str(binding["actor_identity"]) for binding in bindings]
+    actors = [str(binding["participant_identity"]) for binding in bindings]
     return {
         "record_type": "OperatorApproval",
         "schema_version": "m2-markdown-2",
@@ -112,7 +120,7 @@ def _approval_data(
         "scope_phase": phase,
         "mechanism": mechanism,
         "operator_identity_or_null": operator_identity,
-        "approval_binding_version": "exact-inputs-1",
+        "approval_binding_version": "exact-inputs-2",
         "approved_invocations": bindings,
     }
 
@@ -129,7 +137,25 @@ def _approval_target(run: Path, round_id: str) -> Path:
 
 def _binding_key(binding: dict[str, Any]) -> tuple[Any, ...]:
     return (
-        binding.get("actor_identity"),
+        binding.get("participant_identity", binding.get("actor_identity")),
+        binding.get("participant_profile_id"),
+        binding.get("execution_profile_id"),
+        binding.get("execution_profile_sha256_or_null"),
+        binding.get("player_id"),
+        binding.get("phase"),
+        binding.get("round_id"),
+        binding.get("prompt_path"),
+        binding.get("prompt_sha256"),
+        binding.get("command_sha256"),
+        binding.get("working_directory"),
+        binding.get("artifact_version_id_or_null"),
+        binding.get("artifact_sha256_or_null"),
+    )
+
+
+def _legacy_binding_key(binding: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        binding.get("participant_identity", binding.get("actor_identity")),
         binding.get("player_id"),
         binding.get("phase"),
         binding.get("round_id"),
@@ -148,12 +174,18 @@ def approval_binding_exists(records: list[Record], binding: dict[str, Any]) -> b
 
 def approval_record_for_binding(records: list[Record], binding: dict[str, Any]) -> Record | None:
     wanted = _binding_key(binding)
+    legacy_wanted = _legacy_binding_key(binding)
     for record in records_by_type(records, "OperatorApproval"):
         bindings = record.data.get("approved_invocations")
         if not isinstance(bindings, list):
             continue
-        if any(isinstance(candidate, dict) and _binding_key(candidate) == wanted for candidate in bindings):
-            return record
+        for candidate in bindings:
+            if not isinstance(candidate, dict):
+                continue
+            if _binding_key(candidate) == wanted:
+                return record
+            if "execution_profile_id" not in candidate and _legacy_binding_key(candidate) == legacy_wanted:
+                return record
     return None
 
 
@@ -172,7 +204,7 @@ def stamp_operator_approval(
         records_before = parse_run_records(run)
         phase_before = derive_run_phase(records_before)
         created_at = utc_now()
-        actor_suffix = "-".join(slugify(str(binding["actor_identity"])) for binding in bindings)
+        actor_suffix = "-".join(slugify(str(binding["participant_identity"])) for binding in bindings)
         record_id = (
             f"operator-approval-{slugify(round_id)}-{slugify(phase)}-{actor_suffix}-"
             f"{uuid.uuid4().hex[:12]}"
@@ -204,7 +236,7 @@ def stamp_operator_approval(
                 "operator_approval_id": record_id,
                 "round": normalize_round_id(round_id),
                 "phase": phase,
-                "approved_actors": [binding["actor_identity"] for binding in bindings],
+                "approved_actors": [binding["participant_identity"] for binding in bindings],
                 "operator_approval_sha256": canonical_json_sha256(data),
             },
         )
@@ -214,7 +246,9 @@ def stamp_operator_approval(
 def ensure_invocation_approval(
     run: Path,
     *,
-    actor_identity: str,
+    participant_identity: str,
+    participant_profile_id: str = "legacy-inline-participant-profile",
+    execution_profile_id: str = "legacy-inline-execution-profile",
     player_id: str,
     phase: str,
     round_id: str,
@@ -229,7 +263,9 @@ def ensure_invocation_approval(
     binding = approval_binding(
         run,
         records,
-        actor_identity=actor_identity,
+        participant_identity=participant_identity,
+        participant_profile_id=participant_profile_id,
+        execution_profile_id=execution_profile_id,
         player_id=player_id,
         phase=phase,
         round_id=round_id,
@@ -252,7 +288,9 @@ def ensure_invocation_approval(
 def verify_invocation_approval(
     run: Path,
     *,
-    actor_identity: str,
+    participant_identity: str,
+    participant_profile_id: str = "legacy-inline-participant-profile",
+    execution_profile_id: str = "legacy-inline-execution-profile",
     player_id: str,
     phase: str,
     round_id: str,
@@ -266,7 +304,9 @@ def verify_invocation_approval(
     binding = approval_binding(
         run,
         records,
-        actor_identity=actor_identity,
+        participant_identity=participant_identity,
+        participant_profile_id=participant_profile_id,
+        execution_profile_id=execution_profile_id,
         player_id=player_id,
         phase=phase,
         round_id=round_id,

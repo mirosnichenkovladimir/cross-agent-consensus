@@ -69,6 +69,18 @@ If saved configuration supplies reviewers such as `codex` and `claude`, `consens
 
 Configured CLI reviewers must be invoked with `consensus invoke-agent` before their `RawReviewerOutput` is terminally valid. Direct `capture` is still valid for manual/imported evidence, but it is not live reviewer CLI telemetry.
 
+## Participant And Execution Profiles
+
+Configuration schema `cross-agent-consensus-config-2` separates three names:
+
+- `ParticipantIdentity` is who acts in the protocol;
+- `ParticipantProfile` assigns that identity a role and instructions;
+- `ExecutionProfile` defines how CAC invokes it: adapter, argv, optional model and reasoning effort, prompt transport, output mode, resume declaration, and environment-variable allowlist.
+
+`participant_identities` binds each stable Participant Identity to one Participant Profile and one Execution Profile. Switching that binding changes the invocation without renaming the reviewer, author, or validator. `ConfigResolution`, `OperatorApproval`, and `invocation.json` record the selected profile identifiers and effective argv. CAC inserts `model` and `reasoning_effort` into provider-specific argv, includes Participant Profile instructions in finalized prompts below immutable CAC rules, and passes only environment-variable names listed by the Execution Profile. Exact-input approval hashes the complete resolved Execution Profile.
+
+The 0.12.x reader translates `cross-agent-consensus-config-1` and `reviewer_clis` with deprecation warnings. These compatibility inputs are scheduled for removal in 0.13.0.
+
 ## Terminal Report
 
 Terminal output is `report.md`, not `termination.md`.

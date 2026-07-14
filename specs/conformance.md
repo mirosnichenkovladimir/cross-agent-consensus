@@ -48,7 +48,7 @@ The numeric references below point at invariants in `specs/protocol.md` §5 and 
 ### Reviewer identity and CLI evidence
 
 - [ ] Reviewer identity comes from Participants; review focus/lens values are not used as reviewer identities (§5 inv. 18).
-- [ ] When ConfigResolution records `reviewer_clis.<reviewer>.command`, that reviewer's RawReviewerOutput is backed by a completed `invoke-agent` session before terminal consensus or round-limit closure (§5 inv. 19).
+- [ ] When ConfigResolution binds a Reviewer Participant Identity to a non-manual Execution Profile with argv, that reviewer's RawReviewerOutput is backed by a completed `invoke-agent` session before terminal consensus or round-limit closure (§5 inv. 19).
 - [ ] Recorded local ArtifactVersion digests are recomputed before invocation and termination (§5 inv. 20).
 - [ ] External CLI approval binds the exact prompt, argv, working directory, and readable local artifact digest (§5 inv. 21).
 - [ ] `capture_origin=live_cli` evidence links to the exact completed invocation session (§5 inv. 22).

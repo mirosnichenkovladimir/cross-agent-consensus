@@ -2,7 +2,7 @@
 # Layered resolution merges `defaults.yaml` (committed) with this file on top,
 # then any `--config` value passed on the CLI. Keys omitted here inherit from
 # `defaults.yaml`; keys present here override the same path in defaults.
-schema_version: cross-agent-consensus-config-1
+schema_version: cross-agent-consensus-config-2
 defaults:
   profile: document-consensus
   run_root: runs
@@ -16,18 +16,51 @@ participants:
   reviewers:
     - codex
     - claude
+  validators: []
   human_supervisor: none
-reviewer_clis:
-  codex:
+participant_profiles:
+  orchestrator-default:
+    role: orchestrator
+    instructions:
+      - enforce CAC policy and preserve protocol evidence
+  author-default:
+    role: author
+    instructions:
+      - produce the requested artifact and respond to material findings
+  reviewer-default:
+    role: reviewer
+    instructions:
+      - review the declared artifact and emit evidence-backed findings
+  validator-default:
+    role: validator
+    instructions:
+      - produce deterministic validation evidence
+  human-supervisor-default:
+    role: human_supervisor
+    instructions:
+      - resolve escalations and binding decisions
+execution_profiles:
+  manual-default:
+    adapter: manual
+    command: []
+    prompt_transport: manual
+    output_mode: manual_handoff
+    supports_resume: false
+    env: []
+  codex-reviewer-default:
+    adapter: codex-cli
     command:
       - codex
       - exec
+      - --skip-git-repo-check
       - --json
       - "-"
     prompt_transport: stdin
-    stdout_capture: raw_output
-    stderr_capture: raw_error
-  claude:
+    output_mode: stream_json
+    supports_resume: false
+    env: []
+  claude-reviewer-default:
+    adapter: claude-cli
     command:
       - claude
       - -p
@@ -36,8 +69,22 @@ reviewer_clis:
       - stream-json
       - --include-partial-messages
     prompt_transport: stdin
-    stdout_capture: raw_output
-    stderr_capture: raw_error
+    output_mode: stream_json
+    supports_resume: false
+    env: []
+participant_identities:
+  codex-orchestrator:
+    participant_profile_id: orchestrator-default
+    execution_profile_id: manual-default
+  codex-primary:
+    participant_profile_id: author-default
+    execution_profile_id: manual-default
+  codex:
+    participant_profile_id: reviewer-default
+    execution_profile_id: codex-reviewer-default
+  claude:
+    participant_profile_id: reviewer-default
+    execution_profile_id: claude-reviewer-default
 invocation:
   require_invocation_ready: true
   direct_reviewer_cli: explicit_only

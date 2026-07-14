@@ -14,6 +14,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "skills" / "cross-agent-consensus" / "scripts" / "consensus"
+PACKAGE_ROOT = REPO_ROOT / "skills" / "cross-agent-consensus"
+sys.path.insert(0, str(PACKAGE_ROOT))
+
+from cross_agent_consensus.markdown_records import render_yaml
 
 
 class ConsensusToolTests(unittest.TestCase):
@@ -62,6 +66,78 @@ class ConsensusToolTests(unittest.TestCase):
         runs = [path for path in (tmp / "runs").iterdir() if path.is_dir()]
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0].name, "smoke-cac-scripts-consensus-001")
+        return runs[0]
+
+    def init_profiled_run(
+        self,
+        tmp: Path,
+        *,
+        participant_identity: str,
+        participant_role: str,
+        adapter: str,
+        command: list[str],
+        output_mode: str,
+        env_names: list[str] | None = None,
+        profile_instructions: list[str] | None = None,
+    ) -> Path:
+        profile_id = f"{participant_role}-test-profile"
+        execution_profile_id = f"{participant_role}-test-execution"
+        participant_field = "reviewers" if participant_role == "reviewer" else "validators"
+        config = tmp / "profiled-config.json"
+        config.write_text(
+            render_yaml(
+                {
+                    "schema_version": "cross-agent-consensus-config-2",
+                    "participants": {participant_field: [participant_identity]},
+                    "participant_profiles": {
+                        profile_id: {
+                            "role": participant_role,
+                            "instructions": profile_instructions or [f"test {participant_role} instruction"],
+                        }
+                    },
+                    "execution_profiles": {
+                        execution_profile_id: {
+                            "adapter": adapter,
+                            "command": command,
+                            "prompt_transport": "stdin",
+                            "output_mode": output_mode,
+                            "supports_resume": False,
+                            "env": env_names or [],
+                        }
+                    },
+                    "participant_identities": {
+                        participant_identity: {
+                            "participant_profile_id": profile_id,
+                            "execution_profile_id": execution_profile_id,
+                        }
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cli_args = [
+            "init",
+            "--task",
+            "Profiled CAC invocation",
+            "--artifact-locator",
+            "README.md",
+            "--config",
+            str(config),
+            "--human-supervisor",
+            "none",
+            "--run-root",
+            str(tmp / "runs"),
+            "--unattended-invocation",
+            "--unattended-scope",
+            "test",
+        ]
+        if participant_role == "validator":
+            cli_args.extend(["--validator", participant_identity])
+        result = self.run_cli(*cli_args)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        runs = [path for path in (tmp / "runs").iterdir() if path.is_dir()]
+        self.assertEqual(len(runs), 1)
         return runs[0]
 
     def write_round_batch(
@@ -359,6 +435,25 @@ class ConsensusToolTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         return run / "rounds" / "round-001" / "prompts" / "reviewers" / f"{actor}.md"
+
+    def mark_run_as_legacy_inline_invocation(self, run: Path) -> None:
+        """Remove schema-2 bindings to exercise the supported 0.11 inline-command path."""
+
+        run_md = run / "run.md"
+        text = run_md.read_text(encoding="utf-8")
+        text = text.replace(
+            "config_schema_version: cross-agent-consensus-config-2",
+            "config_schema_version: cross-agent-consensus-config-1",
+        )
+        text = text.replace(
+            "resolved_participant_identities:",
+            "legacy_resolved_participant_identities:",
+        )
+        text = text.replace(
+            "resolved_execution_profiles:",
+            "legacy_resolved_execution_profiles:",
+        )
+        run_md.write_text(text, encoding="utf-8")
 
     def test_version_command_prints_semver(self) -> None:
         result = self.run_cli("--version")
@@ -1088,12 +1183,20 @@ class ConsensusToolTests(unittest.TestCase):
         self.assertEqual(payload["effective"]["participants"]["reviewers"], ["codex", "claude"])
         self.assertEqual(payload["effective"]["participants"]["human_supervisor"], "none")
         self.assertEqual(
-            payload["effective"]["reviewer_clis"]["codex"]["command"],
+            payload["effective"]["execution_profiles"]["codex-reviewer-default"]["command"],
             ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
         )
         self.assertEqual(
-            payload["effective"]["reviewer_clis"]["claude"]["command"],
+            payload["effective"]["execution_profiles"]["claude-reviewer-default"]["command"],
             ["claude", "-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"],
+        )
+        self.assertEqual(
+            payload["effective"]["participant_identities"]["codex"]["execution_profile_id"],
+            "codex-reviewer-default",
+        )
+        self.assertEqual(
+            payload["effective"]["participant_identities"]["claude"]["execution_profile_id"],
+            "claude-reviewer-default",
         )
 
     def test_review_focus_does_not_replace_configured_reviewers(self) -> None:
@@ -1246,6 +1349,10 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertIn("participants.reviewers:", run_text)
             self.assertIn("source_layer: project", run_text)
             self.assertIn("author_identity: author-project", run_text)
+            self.assertIn("resolved_participant_identities:", run_text)
+            self.assertIn("participant_profile_id: reviewer-default", run_text)
+            self.assertIn("execution_profile_id: manual-default", run_text)
+            self.assertIn("resolved_execution_profiles:", run_text)
 
     def test_cli_reviewers_require_explicit_config_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -1410,7 +1517,10 @@ class ConsensusToolTests(unittest.TestCase):
     def test_config_setup_dry_run_outputs_safe_yaml(self) -> None:
         result = self.run_cli("config", "setup", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertIn("schema_version: cross-agent-consensus-config-1", result.stdout)
+        self.assertIn("schema_version: cross-agent-consensus-config-2", result.stdout)
+        self.assertIn("participant_profiles:", result.stdout)
+        self.assertIn("execution_profiles:", result.stdout)
+        self.assertIn("participant_identities:", result.stdout)
         self.assertIn('      - "-"', result.stdout)
         self.assertNotIn("unattended_invocation", result.stdout)
         self.assertNotIn("token", result.stdout.lower())
@@ -1923,6 +2033,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_invocation_ready_requires_recorded_actor_and_raw_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = run / "rounds" / "round-001" / "prompts" / "reviewers" / "manual.md"
             prompt.write_text("review prompt\n", encoding="utf-8")
 
@@ -2032,6 +2143,7 @@ class ConsensusToolTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             run = tmp / "runs" / "prompt-completeness-consensus-001"
+            self.mark_run_as_legacy_inline_invocation(run)
 
             result = self.run_cli(
                 "prompt",
@@ -2089,6 +2201,160 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertIn("raw-output payload", result.stderr)
             self.assertIn("explicit runtime command", result.stderr)
 
+    def test_schema_2_manual_profile_rejects_inline_command_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            prompt = self.write_reviewer_prompt(run)
+
+            result = self.run_cli(
+                "invocation-ready",
+                "--run",
+                str(run),
+                "--actor",
+                "reviewer-codex",
+                "--player",
+                "generic-cli",
+                "--prompt",
+                str(prompt),
+                "--raw-output",
+                str(run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"),
+                "--approved",
+                "--command",
+                sys.executable,
+                "--version",
+            )
+
+            self.assertEqual(result.returncode, 3)
+            self.assertIn("adapter mismatch", result.stderr)
+            self.assertIn("command mismatch", result.stderr)
+
+    def test_schema_2_profile_enforces_environment_allowlist_and_binds_approval_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            script = (
+                "import os,sys; sys.stdin.read(); "
+                "print(os.getenv('CAC_TEST_ALLOWED')); print(os.getenv('CAC_TEST_UNLISTED'))"
+            )
+            command = ["/usr/bin/python3", "-c", script]
+            run = self.init_profiled_run(
+                tmp,
+                participant_identity="reviewer-env",
+                participant_role="reviewer",
+                adapter="generic-cli",
+                command=command,
+                output_mode="raw_stdout",
+                env_names=["CAC_TEST_ALLOWED"],
+            )
+            prompt = self.write_reviewer_prompt(run, "reviewer-env")
+            raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-env.out"
+
+            result = self.run_cli(
+                "invoke-agent",
+                "--run",
+                str(run),
+                "--round",
+                "round-1",
+                "--phase",
+                "reviewer",
+                "--actor",
+                "reviewer-env",
+                "--player",
+                "generic-cli",
+                "--prompt",
+                str(prompt),
+                "--raw-output",
+                str(raw_output),
+                "--approved",
+                env={"CAC_TEST_ALLOWED": "visible", "CAC_TEST_UNLISTED": "hidden"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(raw_output.read_text(encoding="utf-8"), "visible\nNone\n")
+            session = run / "rounds" / "round-001" / "agents" / "reviewer-env" / "session-001"
+            command_record = json.loads((session / "command.json").read_text(encoding="utf-8"))
+            self.assertEqual(command_record["env_allowlist"], ["CAC_TEST_ALLOWED"])
+            approval_text = (run / "rounds" / "round-001" / "operator-approval.md").read_text(encoding="utf-8")
+            self.assertRegex(approval_text, r"execution_profile_sha256_or_null: [0-9a-f]{64}")
+
+    def test_validator_identity_is_recorded_and_passes_readiness_with_bound_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            command = ["/usr/bin/python3", "-c", "import sys; sys.stdin.read(); print('pass')"]
+            run = self.init_profiled_run(
+                tmp,
+                participant_identity="validator-x",
+                participant_role="validator",
+                adapter="generic-cli",
+                command=command,
+                output_mode="raw_stdout",
+            )
+            prompt_result = self.run_cli(
+                "prompt",
+                "--run",
+                str(run),
+                "--phase",
+                "validator",
+                "--actor",
+                "validator-x",
+                "--round",
+                "round-1",
+            )
+            self.assertEqual(prompt_result.returncode, 0, prompt_result.stderr + prompt_result.stdout)
+            prompt = run / "rounds" / "round-001" / "prompts" / "validators" / "validator-x.md"
+            raw_output = run / "rounds" / "round-001" / "raw" / "validators" / "validator-x.out"
+
+            ready = self.run_cli(
+                "invocation-ready",
+                "--run",
+                str(run),
+                "--actor",
+                "validator-x",
+                "--player",
+                "generic-cli",
+                "--prompt",
+                str(prompt),
+                "--raw-output",
+                str(raw_output),
+                "--approved",
+            )
+
+            self.assertEqual(ready.returncode, 0, ready.stderr + ready.stdout)
+            participants_text = (run / "run.md").read_text(encoding="utf-8")
+            self.assertIn("validator_identities:\n  - validator-x", participants_text)
+
+    def test_builtin_validator_ids_remain_policy_requirements_not_participants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = self.init_run(Path(tmp_name))
+
+            run_text = (run / "run.md").read_text(encoding="utf-8")
+
+            self.assertIn("required_validator_ids:\n  - artifact_exists", run_text)
+            self.assertIn("validator_identities: []", run_text)
+            resolved_identities = run_text.split("resolved_participant_identities:", 1)[1].split(
+                "resolved_execution_profiles:", 1
+            )[0]
+            self.assertNotIn("artifact_exists", resolved_identities)
+
+    def test_bound_participant_profile_instructions_appear_in_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            run = self.init_profiled_run(
+                tmp,
+                participant_identity="reviewer-instructed",
+                participant_role="reviewer",
+                adapter="generic-cli",
+                command=["/usr/bin/python3", "--version"],
+                output_mode="raw_stdout",
+                profile_instructions=["inspect permission boundaries before style"],
+            )
+
+            prompt = self.write_reviewer_prompt(run, "reviewer-instructed")
+            prompt_text = prompt.read_text(encoding="utf-8")
+
+            self.assertIn("## ParticipantProfile", prompt_text)
+            self.assertIn("Instruction: inspect permission boundaries before style", prompt_text)
+            self.assertIn("CAC Policy, ReviewScope, and phase output requirements take precedence", prompt_text)
+
     def test_players_probe_reports_generic_cli_capabilities(self) -> None:
         result = self.run_cli(
             "players",
@@ -2111,6 +2377,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_invoke_agent_generic_cli_writes_session_telemetry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
 
@@ -2141,8 +2408,22 @@ class ConsensusToolTests(unittest.TestCase):
             session = run / "rounds" / "round-001" / "agents" / "reviewer-codex" / "session-001"
             self.assertTrue(session.is_dir())
             invocation = json.loads((session / "invocation.json").read_text(encoding="utf-8"))
-            self.assertEqual(invocation["schema_version"], "cross-agent-consensus-invocation-1")
+            self.assertEqual(invocation["schema_version"], "cross-agent-consensus-invocation-2")
             self.assertEqual(invocation["round_id"], "round-001")
+            self.assertEqual(invocation["participant_identity"], "reviewer-codex")
+            self.assertEqual(invocation["participant_profile_id"], "legacy-inline-participant-profile")
+            self.assertEqual(
+                invocation["execution_profile_id"],
+                "legacy-inline-generic-cli-execution-profile",
+            )
+            self.assertEqual(
+                invocation["effective_command"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; prompt=sys.stdin.read(); print('final:' + prompt.splitlines()[0])",
+                ],
+            )
             command = json.loads((session / "command.json").read_text(encoding="utf-8"))
             self.assertEqual(command["schema_version"], "cross-agent-consensus-command-1")
             self.assertEqual(command["prompt_transport"], "stdin")
@@ -2189,6 +2470,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_invoke_agent_rejects_secret_argv_and_records_failed_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
 
@@ -2210,8 +2492,9 @@ class ConsensusToolTests(unittest.TestCase):
                 str(raw_output),
                 "--approved",
                 "--command",
-                sys.executable,
-                "--api-key=abc123",
+                "env",
+                "OPENAI_API_KEY=abc123",
+                "/usr/bin/true",
             )
             self.assertEqual(result.returncode, 3)
             self.assertIn("secret-looking", result.stderr)
@@ -2234,9 +2517,29 @@ class ConsensusToolTests(unittest.TestCase):
             ]
             self.assertEqual(events, ["prepared", "failed"])
 
+    def test_participant_profile_role_rejects_prompt_for_another_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = self.init_run(Path(tmp_name))
+
+            result = self.run_cli(
+                "prompt",
+                "--run",
+                str(run),
+                "--phase",
+                "author",
+                "--actor",
+                "reviewer-codex",
+                "--round",
+                "round-1",
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("phase 'author' requires ParticipantProfile role 'author'", result.stderr)
+
     def test_invoke_agent_rejects_prompt_from_other_round(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt_round_1 = self.write_reviewer_prompt(run)
             self.write_round_batch(run, 2, "regression_check")
             prompt_round_2_result = self.run_cli(
@@ -2288,6 +2591,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_invoke_agent_rejects_raw_output_from_other_round(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             self.write_reviewer_prompt(run)
             self.write_round_batch(run, 2, "regression_check")
             prompt_round_2_result = self.run_cli(
@@ -2340,6 +2644,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_claude_cli_player_parses_stream_json_events_and_final_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
             script = (
@@ -2391,6 +2696,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_claude_cli_player_rejects_stream_json_without_verbose(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
 
@@ -2425,6 +2731,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_codex_cli_player_parses_json_events_and_message_deltas(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
             script = (
@@ -2483,6 +2790,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_codex_cli_player_rejects_command_without_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
 
@@ -2515,6 +2823,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_agent_status_observes_stale_process_and_cancel_stops_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
             child = subprocess.Popen(
@@ -2604,6 +2913,7 @@ class ConsensusToolTests(unittest.TestCase):
     def test_agent_cancel_refuses_terminal_session_without_appending_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run = self.init_run(Path(tmp_name), "--unattended-invocation", "--unattended-scope", "test")
+            self.mark_run_as_legacy_inline_invocation(run)
             prompt = self.write_reviewer_prompt(run)
             raw_output = run / "rounds" / "round-001" / "raw" / "reviewers" / "reviewer-codex.out"
 

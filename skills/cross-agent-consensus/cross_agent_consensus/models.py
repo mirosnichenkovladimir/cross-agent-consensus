@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +69,44 @@ class ConfigResolution:
     errors: list[str]
 
 
+@dataclass(frozen=True)
+class ParticipantProfile:
+    participant_profile_id: str
+    role: str
+    instructions: list[str]
+
+
+@dataclass(frozen=True)
+class ExecutionProfile:
+    execution_profile_id: str
+    adapter_id: str
+    command: list[str]
+    model_id_or_null: str | None
+    reasoning_effort_or_null: str | None
+    prompt_transport: str
+    output_mode: str
+    supports_resume: bool
+    env_allowlist: list[str]
+
+
+@dataclass(frozen=True)
+class ParticipantIdentity:
+    participant_identity: str
+    participant_profile_id: str
+    execution_profile_id: str
+
+
+@dataclass(frozen=True)
+class ResolvedInvocationProfile:
+    participant_profile_id: str
+    execution_profile_id: str
+    adapter_id: str
+    command: list[str]
+    prompt_transport: str
+    output_mode: str
+    env_allowlist: list[str]
+
+
 @dataclass
 class PlayerCapabilities:
     player_id: str
@@ -96,7 +134,9 @@ class AgentInvocation:
     run: Path
     round_id: str
     phase: str
-    actor_identity: str
+    participant_identity: str
+    participant_profile_id: str
+    execution_profile_id: str
     player_id: str
     prompt_path: Path
     raw_output_path: Path
@@ -107,6 +147,9 @@ class AgentInvocation:
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
     session_id: str
+    prompt_transport: str = "stdin"
+    output_mode: str = "raw_stdout"
+    env_allowlist: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -162,6 +205,8 @@ class InvocationReadyInput:
     run: str
     actor: str
     player: str
+    participant_profile_id: str | None
+    execution_profile_id: str | None
     prompt: str
     raw_output: str
     approved: bool

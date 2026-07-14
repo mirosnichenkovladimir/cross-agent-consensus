@@ -28,6 +28,7 @@ Every protocol record MUST include a stable identifier, `run_id`, `actor_identit
 
 Minimum record types:
 
+- `Participants`: `participants_record_id`, `orchestrator_identity`, `author_identity`, `reviewer_identities`, optional `validator_identities`, and `human_supervisor_identity_or_null`. Current runs record every configured validator in `validator_identities`; historical runs may derive validators from Policy.
 - `ReviewScope`: `review_scope_id`, `objective`, `in_scope`, `out_of_scope`, `review_modes_allowed`, `max_fresh_review_rounds`, `max_remediation_rounds_per_finding`, and optional `promotion_policy`. The Review Scope defines what can block consensus for the run.
 - `ReviewBatch`: `review_batch_id`, `review_scope_id`, `review_mode`, `target_artifact_version_id`, and optional `source_finding_ids` and `review_focus`. Valid `review_mode` values are `fresh_review`, `remediation_verification`, `regression_check`, and `scope_triage`. `review_focus` values are prompt lenses, not participant identities. A conclusion-validation batch uses `review_mode=scope_triage`, `batch_purpose=conclusion_validation`, `source_finding_ids` that reference Normalized Findings, and `expected_reviewer_identities` naming the recalled reviewers.
 - `ArtifactVersion`: `artifact_version_id`, `predecessor_id_or_null`, `content_locator`, and `content_hash_or_null`, plus optional `content_locator_base_or_null` for resolving a relative local path. The `artifact_version_id` MUST be unique within the run and stable once recorded.
@@ -40,7 +41,8 @@ Minimum record types:
 - `ClarificationRecord`: `clarification_record_id`, `normalized_finding_id`, `requested_by`, `responded_by`, `question`, `answer_or_reason_unavailable`, and `created_at`.
 - `ReReviewDecision`: `re_review_decision_id`, `normalized_finding_id`, `reviewer_identity`, `decision`, `rationale`, and `artifact_version_id_or_null`.
 - `ValidationEvidence`: `validation_evidence_id`, `validator_id`, `target_artifact_version_id`, `result`, `payload_reference`, `produced_by`, and optional `waiver_authority` and `waiver_rationale`. Implementations that copy a payload SHOULD also record `payload_sha256`, `capture_origin`, `session_id_or_null`, `session_path_or_null`, `prompt_sha256_or_null`, and `session_exit_sha256_or_null`.
-- `OperatorApproval`: `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, and `operator_identity_or_null`. An exact-input approval adds `approval_binding_version=exact-inputs-1` and one `approved_invocations` mapping per actor with prompt, command, and target ArtifactVersion digests.
+- `OperatorApproval`: `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, and `operator_identity_or_null`. A current exact-input approval adds `approval_binding_version=exact-inputs-2` and one `approved_invocations` mapping per Participant Identity with `participant_profile_id`, `execution_profile_id`, the resolved Execution Profile digest, prompt, command, and target ArtifactVersion digests. Readers MAY accept historical `exact-inputs-1` bindings that used `actor_identity` and omitted profile identifiers.
+- `ConfigResolution`: `config_resolution_id`, `config_schema_version`, `sources`, `effective_values`, `resolved_participant_identities`, `resolved_execution_profiles`, `diagnostics`, and `redactions`. The identity mapping binds each selected Participant Identity to one Participant Profile and one Execution Profile without changing the protocol identity.
 - `EscalationRecord`: `escalation_record_id`, `affected_finding_ids`, `reason`, `requested_authority`, and `created_at`.
 - `HumanDecision`: `human_decision_id`, `affected_finding_ids_or_validator_ids`, `decision_type`, `rationale`, `binding_authority`, `requires_new_artifact_version`, and `created_at`. Valid `decision_type` values are `mark_resolved`, `accept_author_rejection`, `require_revision`, `mark_non_material`, `dispute_materiality`, `waive_validator`, `terminate_escalated_to_human`, and `abort_run`. For run-scoped `terminate_escalated_to_human` and `abort_run` decisions, `affected_finding_ids_or_validator_ids` MUST be `["__run_scope__"]`. Finding lifecycle state effects are defined in section 7.
 - `AbortRecord`: `abort_record_id`, `trigger_actor`, `reason`, `artifact_version_id_or_null`, `unresolved_finding_ids`, and `created_at`.
@@ -75,7 +77,7 @@ Validators are profile-defined or policy-defined. The base protocol does not req
 16. Human decisions are binding unless an implementation profile defines another governance model.
 17. When a conclusion-validation batch is scheduled, Author Response for the referenced Normalized Findings MUST wait until validation outputs are captured from every `expected_reviewer_identities` participant, or Policy explicitly records the batch id in `skipped_conclusion_validation_batch_ids`.
 18. Reviewer identity MUST come from Participants. Review focus/lens values MUST NOT be used as reviewer identities.
-19. If ConfigResolution records `reviewer_clis.<reviewer>.command`, RawReviewerOutput from that reviewer MUST be backed by a completed `invoke-agent` session before terminal consensus or round-limit closure.
+19. If ConfigResolution binds a Reviewer Participant Identity to a non-manual Execution Profile with argv, RawReviewerOutput from that reviewer MUST be backed by a completed `invoke-agent` session before terminal consensus or round-limit closure.
 20. An implementation that records an ArtifactVersion content digest MUST recompute it before actor invocation and terminal output; a mismatch blocks both actions.
 21. An external CLI approval MUST bind the exact prompt, runtime argv, and working directory. If the target ArtifactVersion is a readable local file, the approval MUST also bind its content digest.
 22. `capture_origin=live_cli` evidence MUST reference the completed invocation session whose prompt, command, and payload produced that evidence.
@@ -91,7 +93,7 @@ The Orchestrator records:
 - Task Brief;
 - Policy;
 - Review Scope;
-- participant roles and logical identities;
+- participant roles, Participant Identities, Participant Profiles, and Execution Profile bindings;
 - required validators, if any;
 - initial Artifact Version if one exists;
 - round limits, including separate fresh-review and remediation limits where the profile defines them.

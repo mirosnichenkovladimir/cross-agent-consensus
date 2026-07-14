@@ -30,6 +30,8 @@ from cross_agent_consensus.models import (
     InvocationCommandInput,
     InvocationReadyInput,
 )
+from cross_agent_consensus.profiles import bind_recorded_invocation_profile
+from cross_agent_consensus.records import parse_run_records
 
 from .adapters import GenericCliPlayer, ManualPlayer, get_player_adapter
 from .readiness import (
@@ -155,7 +157,9 @@ def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPath
         run=Path(args.run),
         round_id=round_id,
         phase=args.phase,
-        actor_identity=args.actor,
+        participant_identity=args.actor,
+        participant_profile_id=args.participant_profile_id or "legacy-inline-participant-profile",
+        execution_profile_id=args.execution_profile_id or f"legacy-inline-{args.player}-execution-profile",
         player_id=args.player,
         prompt_path=prompt_path,
         raw_output_path=raw_output_path,
@@ -166,6 +170,9 @@ def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPath
         stale_timeout_seconds=args.stale_timeout_seconds,
         heartbeat_interval_seconds=args.heartbeat_interval_seconds,
         session_id=paths.session.name,
+        prompt_transport=getattr(args, "prompt_transport", "stdin"),
+        output_mode=getattr(args, "output_mode", "raw_stdout"),
+        env_allowlist=list(getattr(args, "env_allowlist", [])),
     )
 
 
@@ -186,7 +193,7 @@ def prepare_agent_session(args: InvocationCommandInput, command: list[str]) -> t
             cwd=invocation.cwd,
             prompt_transport="manual",
             output_mode="manual_handoff",
-            env_allowlist=[],
+            env_allowlist=invocation.env_allowlist,
             executable_probe={"executable": False, "path": None},
         )
     else:
@@ -246,6 +253,11 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
         proc = subprocess.Popen(
             command_spec.argv,
             cwd=str(command_spec.cwd),
+            env={
+                name: os.environ[name]
+                for name in command_spec.env_allowlist
+                if name in os.environ
+            },
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -427,7 +439,9 @@ def exact_invocation_approval(
     if require_existing:
         return verify_invocation_approval(
             Path(args.run),
-            actor_identity=args.actor,
+            participant_identity=args.actor,
+            participant_profile_id=args.participant_profile_id or "legacy-inline-participant-profile",
+            execution_profile_id=args.execution_profile_id or f"legacy-inline-{args.player}-execution-profile",
             player_id=args.player,
             phase=args.phase,
             round_id=args.round,
@@ -437,7 +451,9 @@ def exact_invocation_approval(
         )
     return ensure_invocation_approval(
         Path(args.run),
-        actor_identity=args.actor,
+        participant_identity=args.actor,
+        participant_profile_id=args.participant_profile_id or "legacy-inline-participant-profile",
+        execution_profile_id=args.execution_profile_id or f"legacy-inline-{args.player}-execution-profile",
         player_id=args.player,
         phase=args.phase,
         round_id=args.round,
@@ -451,14 +467,21 @@ def exact_invocation_approval(
 def cmd_invoke_agent(args: InvocationCommandInput) -> int:
     run = Path(args.run)
     command = runtime_command(args.command)
+    command, profile_messages = bind_recorded_invocation_profile(
+        parse_run_records(run), args, command
+    )
     require_existing_approval = bool(getattr(args, "require_existing_approval", False))
     try:
+        if profile_messages:
+            for message in profile_messages:
+                eprint(f"error: {message}")
+            return 3
         if args.stale_timeout_seconds < args.idle_timeout_seconds:
             raise ValueError("--stale-timeout-seconds must be greater than or equal to --idle-timeout-seconds")
         secret_messages = secret_argv_errors(command)
         if secret_messages:
             reason = "; ".join(secret_messages)
-            invocation, paths = prepare_rejected_agent_session(args, command, reason)
+            invocation, paths = prepare_rejected_agent_session(args, [], reason)
             print(f"session: {paths.session}")
             record_failed_agent_session(paths, invocation, reason)
             for message in secret_messages:
@@ -527,6 +550,8 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             run=str(run),
             actor=args.actor,
             player=args.player,
+            participant_profile_id=args.participant_profile_id,
+            execution_profile_id=args.execution_profile_id,
             prompt=args.prompt,
             raw_output=args.raw_output,
             approved=args.approved,
@@ -568,7 +593,17 @@ def cmd_agent_cancel(args: argparse.Namespace) -> int:
             run=run,
             round_id=str(invocation_data.get("round_id") or padded_round_id(args.round)),
             phase=str(invocation_data.get("phase") or "unknown"),
-            actor_identity=str(invocation_data.get("actor_identity") or args.actor),
+            participant_identity=str(
+                invocation_data.get("participant_identity")
+                or invocation_data.get("actor_identity")
+                or args.actor
+            ),
+            participant_profile_id=str(
+                invocation_data.get("participant_profile_id") or "legacy-inline-participant-profile"
+            ),
+            execution_profile_id=str(
+                invocation_data.get("execution_profile_id") or "legacy-inline-execution-profile"
+            ),
             player_id=str(invocation_data.get("player_id") or "generic-cli"),
             prompt_path=run / str(invocation_data.get("prompt_source_path") or ""),
             raw_output_path=run / str(invocation_data.get("raw_output_path") or ""),

@@ -39,6 +39,7 @@ def infer_validators(profile: str, validators: list[str]) -> list[str]:
 def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> dict[Path, str]:
     run = Path(args.run_root) / run_id
     validators = infer_validators(args.profile, args.validator)
+    participant_validators = list(args.validator)
     if not validators:
         raise ValueError("--validator is required when --profile is not document-consensus")
     if args.orchestrator == args.author or args.orchestrator in args.reviewer:
@@ -148,6 +149,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
                 "orchestrator_identity": args.orchestrator,
                 "author_identity": args.author,
                 "reviewer_identities": args.reviewer,
+                "validator_identities": participant_validators,
                 "human_supervisor_identity_or_null": args.human_supervisor,
             }
         ),

@@ -22,11 +22,15 @@ from cross_agent_consensus.approval import (
 )
 from cross_agent_consensus.capture import cmd_capture
 from cross_agent_consensus.init import build_init_files
-from cross_agent_consensus.integrity import _approval_covers_session, command_sha256
+from cross_agent_consensus.integrity import (
+    _approval_covers_session,
+    canonical_json_sha256,
+    command_sha256,
+)
 from cross_agent_consensus.io import append_jsonl, sha256_file
 from cross_agent_consensus.layout import required_run_paths, round_dir
 from cross_agent_consensus.invocation.process_monitor import cmd_invoke_agent
-from cross_agent_consensus.models import CaptureCommandInput, InvocationCommandInput
+from cross_agent_consensus.models import CaptureCommandInput, InvocationCommandInput, Record
 from cross_agent_consensus.records import parse_run_records, records_by_type
 from cross_agent_consensus.run_audit import (
     LEGACY_RUN_EVENT_SCHEMA,
@@ -91,6 +95,70 @@ def _stage_run(tmp: Path) -> tuple[Path, Path]:
 
 
 class IntegrityTests(unittest.TestCase):
+    def test_exact_inputs_2_compares_resolved_execution_profile_digest(self) -> None:
+        execution_profile = {
+            "execution_profile_id": "reviewer-execution",
+            "adapter_id": "generic-cli",
+            "command": ["/usr/bin/true"],
+            "prompt_transport": "stdin",
+            "output_mode": "raw_stdout",
+            "supports_resume": False,
+            "env_allowlist": ["HOME"],
+        }
+        config_record = Record(
+            "ConfigResolution",
+            "config-resolution-test",
+            Path("run.md"),
+            1,
+            {
+                "config_schema_version": "cross-agent-consensus-config-2",
+                "resolved_execution_profiles": {"reviewer-execution": execution_profile},
+            },
+        )
+        binding = {
+            "participant_identity": "reviewer",
+            "participant_profile_id": "reviewer-profile",
+            "execution_profile_id": "reviewer-execution",
+            "execution_profile_sha256_or_null": "0" * 64,
+            "player_id": "generic-cli",
+            "phase": "reviewer",
+            "round_id": "round-1",
+            "prompt_path": "prompt.md",
+            "prompt_sha256": "1" * 64,
+            "command_sha256": "2" * 64,
+            "working_directory": "/tmp",
+            "artifact_version_id_or_null": "v1",
+            "artifact_sha256_or_null": "3" * 64,
+        }
+        approval_record = Record(
+            "OperatorApproval",
+            "approval-test",
+            Path("approval.md"),
+            1,
+            {
+                "approval_binding_version": "exact-inputs-2",
+                "approved_invocations": [binding],
+            },
+        )
+        exact = {
+            "participant_identity": "reviewer",
+            "participant_profile_id": "reviewer-profile",
+            "execution_profile_id": "reviewer-execution",
+            "player_id": "generic-cli",
+            "phase": "reviewer",
+            "round_id": "round-001",
+            "prompt_path": "prompt.md",
+            "prompt_sha256": "1" * 64,
+            "command_digest": "2" * 64,
+            "working_directory": "/tmp",
+            "artifact_version_id": "v1",
+            "artifact_sha256": "3" * 64,
+        }
+
+        self.assertFalse(_approval_covers_session([config_record, approval_record], **exact))
+        binding["execution_profile_sha256_or_null"] = canonical_json_sha256(execution_profile)
+        self.assertTrue(_approval_covers_session([config_record, approval_record], **exact))
+
     def test_session_approval_requires_round_prompt_path_and_artifact_hash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run, artifact = _stage_run(Path(tmp_name))
@@ -100,7 +168,7 @@ class IntegrityTests(unittest.TestCase):
             binding = approval_binding(
                 run,
                 parse_run_records(run),
-                actor_identity="reviewer",
+                participant_identity="reviewer",
                 player_id="generic-cli",
                 phase="reviewer",
                 round_id="round-1",
@@ -118,7 +186,7 @@ class IntegrityTests(unittest.TestCase):
             )
             records = parse_run_records(run)
             exact = {
-                "actor_identity": "reviewer",
+                "participant_identity": "reviewer",
                 "player_id": "generic-cli",
                 "phase": "reviewer",
                 "round_id": "round-001",
@@ -159,7 +227,7 @@ class IntegrityTests(unittest.TestCase):
             binding = approval_binding(
                 run,
                 parse_run_records(run),
-                actor_identity="reviewer",
+                participant_identity="reviewer",
                 player_id="generic-cli",
                 phase="reviewer",
                 round_id="round-1",
@@ -205,7 +273,7 @@ class IntegrityTests(unittest.TestCase):
             binding = approval_binding(
                 run,
                 records,
-                actor_identity="reviewer",
+                participant_identity="reviewer",
                 player_id="generic-cli",
                 phase="reviewer",
                 round_id="round-1",
@@ -233,7 +301,7 @@ class IntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "drifted after OperatorApproval"):
                 verify_invocation_approval(
                     run,
-                    actor_identity="reviewer",
+                    participant_identity="reviewer",
                     player_id="generic-cli",
                     phase="reviewer",
                     round_id="round-1",
@@ -260,7 +328,7 @@ class IntegrityTests(unittest.TestCase):
             binding = approval_binding(
                 run,
                 parse_run_records(run),
-                actor_identity="reviewer",
+                participant_identity="reviewer",
                 player_id="generic-cli",
                 phase="reviewer",
                 round_id="round-1",
@@ -290,6 +358,8 @@ class IntegrityTests(unittest.TestCase):
                 phase="reviewer",
                 actor="reviewer",
                 player="generic-cli",
+                participant_profile_id=None,
+                execution_profile_id=None,
                 prompt=str(prompt),
                 raw_output=str(round_dir(run, "round-1") / "raw" / "reviewers" / "reviewer.out"),
                 approved=True,
@@ -326,7 +396,7 @@ class IntegrityTests(unittest.TestCase):
             binding = approval_binding(
                 run,
                 parse_run_records(run),
-                actor_identity="reviewer",
+                participant_identity="reviewer",
                 player_id="generic-cli",
                 phase="reviewer",
                 round_id="round-1",
@@ -348,7 +418,7 @@ class IntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "drifted after OperatorApproval"):
                 verify_invocation_approval(
                     run,
-                    actor_identity="reviewer",
+                    participant_identity="reviewer",
                     player_id="generic-cli",
                     phase="reviewer",
                     round_id="round-1",
@@ -408,6 +478,8 @@ class IntegrityTests(unittest.TestCase):
                 phase="reviewer",
                 actor="reviewer",
                 player="generic-cli",
+                participant_profile_id=None,
+                execution_profile_id=None,
                 prompt=str(prompt),
                 raw_output=str(raw_output),
                 approved=True,
@@ -467,6 +539,8 @@ class IntegrityTests(unittest.TestCase):
                 phase="reviewer",
                 actor="reviewer",
                 player="generic-cli",
+                participant_profile_id=None,
+                execution_profile_id=None,
                 prompt=str(prompt),
                 raw_output=str(raw_output),
                 approved=True,
@@ -517,6 +591,8 @@ class IntegrityTests(unittest.TestCase):
                 phase="reviewer",
                 actor="reviewer",
                 player="generic-cli",
+                participant_profile_id=None,
+                execution_profile_id=None,
                 prompt=str(prompt),
                 raw_output=str(raw_output),
                 approved=True,
@@ -569,7 +645,7 @@ class IntegrityTests(unittest.TestCase):
             binding = approval_binding(
                 run,
                 parse_run_records(run),
-                actor_identity="reviewer",
+                participant_identity="reviewer",
                 player_id="generic-cli",
                 phase="reviewer",
                 round_id="round-1",
@@ -592,6 +668,8 @@ class IntegrityTests(unittest.TestCase):
                 phase="reviewer",
                 actor="reviewer",
                 player="generic-cli",
+                participant_profile_id=None,
+                execution_profile_id=None,
                 prompt=str(prompt),
                 raw_output=str(round_dir(run, "round-1") / "raw" / "reviewers" / "reviewer.out"),
                 approved=True,
@@ -764,7 +842,7 @@ class RunAuditTests(unittest.TestCase):
             run_md = run / "run.md"
             run_md.write_text(
                 run_md.read_text(encoding="utf-8").replace(
-                    "- `cross_agent_consensus_version`: `0.11.0`",
+                    "- `cross_agent_consensus_version`: `0.12.0`",
                     "- `cross_agent_consensus_version`: `0.9.2`",
                 ),
                 encoding="utf-8",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sys
 import tempfile
 import unittest
@@ -13,12 +14,24 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from cross_agent_consensus.config import (
     CONFIG_SCHEMA_VERSION,
     canonical_config,
+    load_yaml_mapping,
     resolve_config,
     validate_config_shape,
 )
+from cross_agent_consensus.profiles import parse_profile_definitions, resolved_profile_payload
 
 
 class ConfigTests(unittest.TestCase):
+    def resolved_defaults(self) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            resolution, _ = resolve_config(
+                cwd=Path(tmp_name),
+                no_config=True,
+                strict=True,
+            )
+        self.assertEqual(resolution.errors, [])
+        return resolution.effective
+
     def test_canonical_config_maps_legacy_top_level_defaults(self) -> None:
         data = canonical_config({"profile": "document-consensus", "run_root": "runs/custom"})
 
@@ -148,6 +161,227 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(task_data, {})
         self.assertEqual(resolution.effective["defaults"]["profile"], "implementation-test")
         self.assertEqual(resolution.provenance["defaults.profile"], "cli")
+
+    def test_defaults_parse_typed_participant_and_execution_profiles(self) -> None:
+        participant_profiles, execution_profiles, identities, errors = parse_profile_definitions(
+            self.resolved_defaults()
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(participant_profiles["reviewer-default"].role, "reviewer")
+        self.assertEqual(identities["codex"].participant_profile_id, "reviewer-default")
+        self.assertEqual(identities["codex"].execution_profile_id, "codex-reviewer-default")
+        self.assertEqual(execution_profiles["codex-reviewer-default"].adapter_id, "codex-cli")
+        self.assertEqual(
+            execution_profiles["codex-reviewer-default"].command,
+            ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
+        )
+
+    def test_project_layer_can_switch_execution_profile_without_renaming_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            project = Path(tmp_name)
+            config = project / ".cross-agent-consensus.yaml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "schema_version: cross-agent-consensus-config-2",
+                        "execution_profiles:",
+                        "  codex-reviewer-economy:",
+                        "    adapter: codex-cli",
+                        "    command:",
+                        "      - codex",
+                        "      - exec",
+                        "      - --skip-git-repo-check",
+                        "      - --json",
+                        "      - -",
+                        "    model: gpt-5-mini",
+                        "    reasoning_effort: low",
+                        "    prompt_transport: stdin",
+                        "    output_mode: stream_json",
+                        "    supports_resume: false",
+                        "    env: []",
+                        "participant_identities:",
+                        "  codex:",
+                        "    execution_profile_id: codex-reviewer-economy",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            resolution, _ = resolve_config(cwd=project, strict=True)
+
+        self.assertEqual(resolution.errors, [])
+        binding = resolution.effective["participant_identities"]["codex"]
+        self.assertEqual(binding["participant_profile_id"], "reviewer-default")
+        self.assertEqual(binding["execution_profile_id"], "codex-reviewer-economy")
+        self.assertEqual(
+            resolution.effective["execution_profiles"]["codex-reviewer-economy"]["model"],
+            "gpt-5-mini",
+        )
+        _, resolved_execution_profiles, errors = resolved_profile_payload(resolution.effective)
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            resolved_execution_profiles["codex-reviewer-economy"]["command"],
+            [
+                "codex",
+                "exec",
+                "--skip-git-repo-check",
+                "--json",
+                "--model",
+                "gpt-5-mini",
+                "--config",
+                'model_reasoning_effort="low"',
+                "-",
+            ],
+        )
+        self.assertEqual(resolution.provenance["participant_identities.codex.execution_profile_id"], "project")
+
+    def test_v1_reviewer_cli_translates_with_deprecation_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            project = Path(tmp_name)
+            config = project / ".cross-agent-consensus.yaml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "schema_version: cross-agent-consensus-config-1",
+                        "reviewer_clis:",
+                        "  codex:",
+                        "    command:",
+                        "      - codex",
+                        "      - exec",
+                        "      - --skip-git-repo-check",
+                        "      - --json",
+                        "      - -",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            resolution, _ = resolve_config(cwd=project, strict=True)
+
+        self.assertEqual(resolution.errors, [])
+        self.assertTrue(any("config-1 is deprecated" in warning for warning in resolution.warnings))
+        self.assertTrue(any("reviewer_clis is deprecated" in warning for warning in resolution.warnings))
+        self.assertEqual(
+            resolution.effective["participant_identities"]["codex"]["execution_profile_id"],
+            "legacy-codex-execution",
+        )
+        legacy_env = resolution.effective["execution_profiles"]["legacy-codex-execution"]["env"]
+        self.assertIn("HOME", legacy_env)
+        self.assertIn("PATH", legacy_env)
+
+    def test_duplicate_yaml_identifier_is_rejected_before_mapping_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            config = Path(tmp_name) / "duplicate.yaml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "schema_version: cross-agent-consensus-config-2",
+                        "execution_profiles:",
+                        "  codex-reviewer-default:",
+                        "    adapter: codex-cli",
+                        "  codex-reviewer-default:",
+                        "    adapter: generic-cli",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "execution_profiles.codex-reviewer-default"):
+                load_yaml_mapping(config)
+
+    def test_selected_identity_requires_a_binding(self) -> None:
+        effective = copy.deepcopy(self.resolved_defaults())
+        del effective["participant_identities"]["codex"]
+
+        _, _, _, errors = parse_profile_definitions(effective)
+
+        self.assertIn("participants selects 'codex' but participant_identities has no binding", errors)
+
+    def test_execution_profile_rejects_unknown_adapter_invalid_argv_resume_and_secret(self) -> None:
+        mutations = [
+            (
+                {"adapter": "unknown-cli"},
+                "unknown player: 'unknown-cli'",
+            ),
+            (
+                {"command": [""]},
+                "command entries must be non-empty strings without NUL bytes",
+            ),
+            (
+                {"supports_resume": True},
+                "supports_resume is true but adapter codex-cli cannot resume",
+            ),
+            (
+                {"command": ["codex", "--api-key=abc123"]},
+                "passes a secret-looking value in --api-key",
+            ),
+            (
+                {"command": ["env", "OPENAI_API_KEY=x", "/usr/bin/true"], "adapter": "generic-cli", "output_mode": "raw_stdout"},
+                "secret-looking value in environment assignment OPENAI_API_KEY",
+            ),
+        ]
+        for mutation, expected in mutations:
+            with self.subTest(expected=expected):
+                effective = copy.deepcopy(self.resolved_defaults())
+                effective["execution_profiles"]["codex-reviewer-default"].update(mutation)
+
+                _, _, _, errors = parse_profile_definitions(effective)
+
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_execution_profile_rejects_output_mode_that_contradicts_command(self) -> None:
+        effective = copy.deepcopy(self.resolved_defaults())
+        effective["execution_profiles"]["codex-reviewer-default"]["command"].remove("--json")
+
+        _, _, _, errors = parse_profile_definitions(effective)
+
+        self.assertTrue(any("contradicts command output mode 'raw_stdout'" in error for error in errors), errors)
+
+    def test_codex_declarative_provider_settings_reject_config_argv_duplicates(self) -> None:
+        mutations = [
+            (
+                {"model": "gpt-5-mini", "command": ["codex", "exec", "--json", "-c", 'model="gpt-5"', "-"]},
+                "model must be declared either in model or command",
+            ),
+            (
+                {
+                    "reasoning_effort": "low",
+                    "command": ["codex", "exec", "--json", '--config=model_reasoning_effort="high"', "-"],
+                },
+                "reasoning_effort must be declared either in reasoning_effort or command",
+            ),
+        ]
+        for mutation, expected in mutations:
+            with self.subTest(expected=expected):
+                effective = copy.deepcopy(self.resolved_defaults())
+                effective["execution_profiles"]["codex-reviewer-default"].update(mutation)
+
+                _, _, _, errors = parse_profile_definitions(effective)
+
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_resolved_identity_includes_participant_profile_instructions(self) -> None:
+        effective = copy.deepcopy(self.resolved_defaults())
+
+        resolved_identities, _, errors = resolved_profile_payload(effective)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            resolved_identities["codex"]["instructions"],
+            ["review the declared artifact and emit evidence-backed findings"],
+        )
+
+    def test_participant_profile_role_must_match_selected_role(self) -> None:
+        effective = copy.deepcopy(self.resolved_defaults())
+        effective["participant_profiles"]["reviewer-default"]["role"] = "author"
+
+        _, _, _, errors = parse_profile_definitions(effective)
+
+        self.assertTrue(
+            any("is selected as reviewer" in error and "declares role 'author'" in error for error in errors),
+            errors,
+        )
 
 
 if __name__ == "__main__":

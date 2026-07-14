@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.12.0] - 2026-07-14
+
+### Added
+- Configuration schema `cross-agent-consensus-config-2` defines typed
+  `ParticipantIdentity`, `ParticipantProfile`, and `ExecutionProfile` values.
+  Execution Profiles record a stable identifier, adapter, argv, optional model
+  and reasoning effort, prompt transport, output mode, resume declaration, and
+  environment-variable allowlist.
+- `ConfigResolution` records resolved identity-to-profile mappings and the
+  effective Execution Profile commands. `invocation.json`, agent events, and
+  agent logs use version-2 schemas and record `participant_identity`,
+  `participant_profile_id`, and `execution_profile_id`.
+- Configuration rejects duplicate YAML identifiers, missing identity bindings,
+  role mismatches, unknown adapters, empty or NUL-bearing argv entries,
+  unsupported resume declarations, and secret-looking persisted argv.
+
+### Changed
+- Current exact-input approvals use `approval_binding_version=exact-inputs-2`
+  and bind `participant_identity`, `participant_profile_id`, and
+  `execution_profile_id` in addition to the prompt, argv, working directory,
+  and ArtifactVersion digest.
+- `consensus run`, `invocation-ready`, and `invoke-agent` take their adapter and
+  argv from the Execution Profile recorded when the run was initialized.
+  Changing the identity-to-profile binding changes how CAC invokes a participant
+  without changing its Participant Identity.
+
+### Fixed
+- Rejected secret-bearing argv is redacted from both `command.json` and
+  `invocation.json`; failed-session evidence no longer persists the rejected
+  secret value.
+- Child CLIs receive only the environment-variable names listed by their
+  Execution Profile, and exact-input approval hashes the resolved profile.
+- Integrity recomputes and compares the resolved Execution Profile digest;
+  schema-1 reviewer CLI migration records the inherited environment names.
+- Schema-2 runs reject missing profile bindings, manual-profile command
+  overrides, adapter mismatches, argv mismatches, participant role/phase
+  mismatches, and secret-bearing environment assignments in argv.
+- Provider-specific argv now carries declared model and reasoning effort;
+  `command.json` uses the declared prompt transport and output mode, and Codex
+  `-c`/`--config` duplicates are rejected.
+- `Participants` records validator identities, Participant Profile instructions
+  appear in finalized prompts, and 0.11 Codex/Claude commands retain their
+  structured adapters during `consensus run` migration.
+- Built-in deterministic validator IDs remain Policy requirements; only
+  configured validator participants appear in `Participants.validator_identities`.
+
+### Compatibility
+- `cross-agent-consensus-config-1` and `reviewer_clis` are translated into
+  version-2 profiles with deprecation warnings during the 0.12.x window. They
+  are scheduled for removal in 0.13.0.
+- Historical invocation JSON and `exact-inputs-1` approvals that use
+  `actor_identity` remain readable. Current invocation and approval evidence
+  uses only `participant_identity` for the invoked participant.
+
 ## [0.11.0] - 2026-07-14
 
 ### Changed

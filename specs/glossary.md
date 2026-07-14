@@ -9,6 +9,9 @@ Terms used in `specs/protocol.md`. See section references for normative definiti
 - **Reviewer Agent**: Reviews an artifact version and emits Raw Findings. Reviewers MUST NOT directly modify the artifact in the base protocol (invariant 10).
 - **Validator**: Produces external evidence such as tests, lint, schema checks, screenshots, or structural checks. Validation Evidence has higher authority than unsupported model opinion (invariant 14).
 - **Human Supervisor**: Resolves escalations and approves final outcomes when required. Human decisions are binding unless an implementation profile defines another governance model (invariant 16).
+- **Participant Identity**: Stable name for one Orchestrator, Author, Reviewer, Validator, or Human Supervisor in a run. Changing how CAC invokes the participant does not change this identity.
+- **Participant Profile**: Role and instruction set assigned to a Participant Identity. The instructions refine the role but cannot override CAC Policy, ReviewScope, or phase output requirements.
+- **Execution Profile**: Versioned invocation settings assigned to a Participant Identity: adapter, argv, optional model and reasoning effort, prompt transport, output mode, resume declaration, and environment-variable allowlist. CAC passes only the listed environment variables to the child CLI.
 
 ## Artifacts and policy
 
@@ -18,7 +21,7 @@ Terms used in `specs/protocol.md`. See section references for normative definiti
 - **Policy**: Per-run rules for severity, materiality, round limits, validators, and escalation.
 - **Review Scope**: Defines what can block consensus for the run — objective, in/out-of-scope items, review modes allowed, and round budgets (`ReviewScope` record, §4). A finding outside the Review Scope MUST NOT block consensus unless a Human Decision or policy explicitly promotes it.
 - **Review Batch**: Declares one review mode and the target Artifact Version (`ReviewBatch` record, §4). Valid `review_mode` values are `fresh_review`, `remediation_verification`, `regression_check`, and `scope_triage`. `review_focus` is prompt lensing, not participant identity (invariant 18).
-- **ConfigResolution**: Records which CLIs/runtimes are configured for which reviewer identities; controls whether a reviewer's output requires an `invoke-agent` session (invariant 19).
+- **ConfigResolution**: Records the resolved Participant Identity bindings, Participant Profiles, Execution Profiles, commands, source layers, and diagnostics used to initialize a run. A non-manual reviewer Execution Profile requires supervised `invoke-agent` evidence (invariant 19).
 
 ## Finding objects
 

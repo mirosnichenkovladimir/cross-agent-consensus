@@ -12,9 +12,12 @@ from typing import Any, Iterable
 from cross_agent_consensus.io import read_cac_version, sha256_file, skill_root
 from cross_agent_consensus.markdown_records import frontmatter, parse_yaml_subset
 from cross_agent_consensus.models import ConfigResolution
+from cross_agent_consensus.profiles import parse_profile_definitions, resolved_profile_payload
 
 
-CONFIG_SCHEMA_VERSION = "cross-agent-consensus-config-1"
+CONFIG_SCHEMA_VERSION = "cross-agent-consensus-config-2"
+LEGACY_CONFIG_SCHEMA_VERSION = "cross-agent-consensus-config-1"
+SUPPORTED_CONFIG_SCHEMA_VERSIONS = {LEGACY_CONFIG_SCHEMA_VERSION, CONFIG_SCHEMA_VERSION}
 TASK_SCHEMA_VERSION = "cross-agent-consensus-task-1"
 CAC_VERSION = read_cac_version()
 PEEK_CONFIG_DEFAULTS = {
@@ -87,7 +90,89 @@ def canonical_config(data: dict[str, Any]) -> dict[str, Any]:
         set_nested(result, "defaults.profile", result.pop("profile"))
     if "round_limits" in result:
         set_nested(result, "defaults.round_limits", result.pop("round_limits"))
+    if result.get("schema_version") == LEGACY_CONFIG_SCHEMA_VERSION:
+        _translate_legacy_participants(result)
+    _translate_legacy_reviewer_clis(result)
     return result
+
+
+def _manual_identity_binding(result: dict[str, Any], identity: str, role: str) -> None:
+    identities = result.setdefault("participant_identities", {})
+    if not isinstance(identities, dict) or identity in identities:
+        return
+    identities[identity] = {
+        "participant_profile_id": f"{role}-default",
+        "execution_profile_id": "manual-default",
+    }
+
+
+def _translate_legacy_participants(result: dict[str, Any]) -> None:
+    participants = result.get("participants")
+    if not isinstance(participants, dict):
+        return
+    for field, role in (("orchestrator", "orchestrator"), ("author", "author")):
+        identity = participants.get(field)
+        if isinstance(identity, str):
+            _manual_identity_binding(result, identity, role)
+    for field, role in (("reviewers", "reviewer"), ("validators", "validator")):
+        identities = participants.get(field)
+        if isinstance(identities, list):
+            for identity in identities:
+                if isinstance(identity, str):
+                    _manual_identity_binding(result, identity, role)
+    human = participants.get("human_supervisor")
+    if isinstance(human, str) and human != "none":
+        _manual_identity_binding(result, human, "human_supervisor")
+
+
+def legacy_adapter_for_command(command: list[str]) -> tuple[str, str]:
+    executable = Path(command[0]).name if command else ""
+    if executable == "codex":
+        return "codex-cli", "stream_json" if "--json" in command else "raw_stdout"
+    if executable == "claude":
+        has_stream_json = "--output-format=stream-json" in command or any(
+            command[index] == "--output-format" and index + 1 < len(command) and command[index + 1] == "stream-json"
+            for index in range(len(command))
+        )
+        return "claude-cli", "stream_json" if has_stream_json else "raw_stdout"
+    return "generic-cli", "raw_stdout"
+
+
+def _translate_legacy_reviewer_clis(result: dict[str, Any]) -> None:
+    reviewer_clis = result.get("reviewer_clis")
+    if not isinstance(reviewer_clis, dict):
+        return
+    profiles = result.setdefault("execution_profiles", {})
+    identities = result.setdefault("participant_identities", {})
+    if not isinstance(profiles, dict) or not isinstance(identities, dict):
+        return
+    for identity, mapping in reviewer_clis.items():
+        if not isinstance(identity, str) or not isinstance(mapping, dict):
+            continue
+        command = mapping.get("command")
+        if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+            continue
+        profile_id = f"legacy-{re.sub(r'[^a-z0-9._-]+', '-', identity.lower()).strip('-')}-execution"
+        adapter_id, output_mode = legacy_adapter_for_command(command)
+        legacy_env = mapping.get("env") if "env" in mapping else sorted(os.environ)
+        profiles[profile_id] = {
+            "adapter": adapter_id,
+            "command": command,
+            "prompt_transport": mapping.get("prompt_transport", "stdin"),
+            "output_mode": output_mode,
+            "supports_resume": False,
+            "env": legacy_env,
+        }
+        previous = identities.get(identity)
+        participant_profile_id = (
+            previous.get("participant_profile_id")
+            if isinstance(previous, dict)
+            else "reviewer-default"
+        )
+        identities[identity] = {
+            "participant_profile_id": participant_profile_id,
+            "execution_profile_id": profile_id,
+        }
 
 
 def source_record(layer: str, path: Path | None, present: bool, data: dict[str, Any], note: str | None = None) -> dict[str, Any]:
@@ -105,10 +190,38 @@ def source_record(layer: str, path: Path | None, present: bool, data: dict[str, 
 
 def load_yaml_mapping(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
+    duplicates = duplicate_yaml_mapping_paths(text)
+    if duplicates:
+        raise ValueError(f"duplicate mapping identifiers: {', '.join(duplicates)}")
     data = parse_yaml_subset(text)
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected a YAML mapping")
     return data
+
+
+def duplicate_yaml_mapping_paths(text: str) -> list[str]:
+    """Return repeated mapping paths from the supported YAML subset."""
+
+    parents: list[tuple[int, str]] = []
+    seen: set[tuple[tuple[str, ...], str]] = set()
+    duplicates: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("-") or ":" not in stripped:
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        key = stripped.split(":", 1)[0].strip()
+        while parents and parents[-1][0] >= indent:
+            parents.pop()
+        parent_path = tuple(parent_key for _, parent_key in parents)
+        marker = (parent_path, key)
+        full_path = ".".join((*parent_path, key))
+        if marker in seen and full_path not in duplicates:
+            duplicates.append(full_path)
+        seen.add(marker)
+        if not stripped.split(":", 1)[1].strip():
+            parents.append((indent, key))
+    return duplicates
 
 
 def dedupe_paths(paths: Iterable[Path]) -> list[Path]:
@@ -190,7 +303,7 @@ def find_secret_like_values(data: Any, path: str = "") -> list[str]:
             warnings.extend(find_secret_like_values(value, child_path))
     elif isinstance(data, str):
         compact = re.sub(r"[^A-Za-z0-9]", "", data)
-        if len(compact) >= 32 and len(set(compact)) >= 16:
+        if not any(character.isspace() for character in data) and len(compact) >= 32 and len(set(compact)) >= 16:
             warnings.append(f"{path}: value looks like a high-entropy secret")
     elif isinstance(data, list):
         for index, item in enumerate(data):
@@ -201,10 +314,27 @@ def find_secret_like_values(data: Any, path: str = "") -> list[str]:
 def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool, strict: bool) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     errors: list[str] = []
-    allowed_top = {"schema_version", "defaults", "participants", "reviewer_clis", "invocation", "feedback"}
+    allowed_top = {
+        "schema_version",
+        "defaults",
+        "participants",
+        "participant_profiles",
+        "execution_profiles",
+        "participant_identities",
+        "reviewer_clis",
+        "invocation",
+        "feedback",
+    }
     schema_version = data.get("schema_version")
-    if schema_version != CONFIG_SCHEMA_VERSION:
-        errors.append(f"{source}: schema_version must be {CONFIG_SCHEMA_VERSION}")
+    if schema_version not in SUPPORTED_CONFIG_SCHEMA_VERSIONS:
+        errors.append(
+            f"{source}: schema_version must be one of {', '.join(sorted(SUPPORTED_CONFIG_SCHEMA_VERSIONS))}"
+        )
+    elif schema_version == LEGACY_CONFIG_SCHEMA_VERSION:
+        warnings.append(
+            f"{source}: {LEGACY_CONFIG_SCHEMA_VERSION} is deprecated and accepted only in 0.12.x; "
+            f"migrate to {CONFIG_SCHEMA_VERSION} before 0.13.0"
+        )
     unknown = sorted(set(data) - allowed_top)
     if unknown:
         message = f"{source}: unknown config keys: {', '.join(unknown)}"
@@ -239,14 +369,17 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
     if participants is not None and not isinstance(participants, dict):
         errors.append(f"{source}: participants must be a mapping")
     elif isinstance(participants, dict):
-        allowed_participants = {"orchestrator", "author", "reviewers", "human_supervisor"}
+        allowed_participants = {"orchestrator", "author", "reviewers", "validators", "human_supervisor"}
         unknown_participants = sorted(set(participants) - allowed_participants)
         if unknown_participants:
             message = f"{source}: unknown participants keys: {', '.join(unknown_participants)}"
             (errors if strict else warnings).append(message)
-        reviewers = participants.get("reviewers")
-        if reviewers is not None and not (isinstance(reviewers, list) and all(isinstance(item, str) for item in reviewers)):
-            errors.append(f"{source}: participants.reviewers must be a list of strings")
+        for field in ["reviewers", "validators"]:
+            identities = participants.get(field)
+            if identities is not None and not (
+                isinstance(identities, list) and all(isinstance(item, str) for item in identities)
+            ):
+                errors.append(f"{source}: participants.{field} must be a list of strings")
         for key in ["orchestrator", "author", "human_supervisor"]:
             value = participants.get(key)
             if value is not None and not isinstance(value, str):
@@ -255,6 +388,11 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
     if reviewer_clis is not None and not isinstance(reviewer_clis, dict):
         errors.append(f"{source}: reviewer_clis must be a mapping")
     elif isinstance(reviewer_clis, dict):
+        if reviewer_clis:
+            warnings.append(
+                f"{source}: reviewer_clis is deprecated and accepted only in 0.12.x; use "
+                "execution_profiles and participant_identities before 0.13.0"
+            )
         for identity, mapping in reviewer_clis.items():
             if not isinstance(mapping, dict):
                 errors.append(f"{source}: reviewer_clis.{identity} must be a mapping")
@@ -328,6 +466,10 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
         enabled = feedback.get("enabled")
         if enabled is not None and not isinstance(enabled, bool):
             errors.append(f"{source}: feedback.enabled must be a boolean")
+    for field in ["participant_profiles", "execution_profiles", "participant_identities"]:
+        value = data.get(field, {})
+        if value is not None and not isinstance(value, dict):
+            errors.append(f"{source}: {field} must be a mapping")
     if persistent and contains_enabled_unattended(data):
         errors.append(f"{source}: persistent config must not enable unattended_invocation")
     secret_messages = [f"{source}: {message}" for message in find_secret_like_values(data)]
@@ -363,7 +505,9 @@ def validate_task_file_shape(data: dict[str, Any], *, source: str, strict: bool)
         if not isinstance(data["config"], dict):
             errors.append(f"{source}: config must be a mapping")
         else:
-            config = {"schema_version": CONFIG_SCHEMA_VERSION, **canonical_config(data["config"])}
+            config = canonical_config(
+                {"schema_version": LEGACY_CONFIG_SCHEMA_VERSION, **data["config"]}
+            )
             config_warnings, config_errors = validate_config_shape(
                 config,
                 source=f"{source}:config",
@@ -486,7 +630,9 @@ def resolve_config(
                 if not no_config:
                     raw_task_config = raw_task.get("config")
                     task_config: dict[str, Any] = raw_task_config if isinstance(raw_task_config, dict) else {}
-                    config = {"schema_version": CONFIG_SCHEMA_VERSION, **canonical_config(task_config)}
+                    config = canonical_config(
+                        {"schema_version": LEGACY_CONFIG_SCHEMA_VERSION, **task_config}
+                    )
                     effective = deep_merge_config(effective, {key: value for key, value in config.items() if key != "schema_version"})
                     for field in flatten_values({key: value for key, value in config.items() if key != "schema_version"}):
                         provenance[field] = "task_file"
@@ -518,7 +664,22 @@ def resolve_config(
         effective = deep_merge_config(effective, cli_config)
         for field in flatten_values(cli_config):
             provenance[field] = "cli"
+        cli_participants = cli_config.get("participants")
+        if isinstance(cli_participants, dict):
+            compatibility_layer = {"participants": cli_participants}
+            _translate_legacy_participants(compatibility_layer)
+            compatibility_identities = compatibility_layer.get("participant_identities")
+            if isinstance(compatibility_identities, dict):
+                effective_identities = effective.setdefault("participant_identities", {})
+                if isinstance(effective_identities, dict):
+                    for identity, binding in compatibility_identities.items():
+                        if identity not in effective_identities:
+                            effective_identities[identity] = binding
+                            provenance[f"participant_identities.{identity}"] = "cli_compatibility"
         sources.append(source_record("cli", None, True, cli_config, "command-line flags"))
+
+    _, _, _, profile_errors = parse_profile_definitions(effective)
+    errors.extend(f"resolved_config: {message}" for message in profile_errors)
 
     return ConfigResolution(effective, sources, provenance, warnings, errors), task_data
 
@@ -541,6 +702,8 @@ def init_cli_config(args: argparse.Namespace) -> dict[str, Any]:
             set_nested(config, path, value)
     if getattr(args, "reviewer", None) is not None:
         set_nested(config, "participants.reviewers", args.reviewer)
+    if getattr(args, "validator", None) is not None:
+        set_nested(config, "participants.validators", args.validator)
     return config
 
 
@@ -603,6 +766,9 @@ def apply_config_to_init_args(args: argparse.Namespace, resolution: ConfigResolu
         args.reviewer = reviewers if isinstance(reviewers, list) else None
     if args.human_supervisor is None:
         args.human_supervisor = participants.get("human_supervisor", "none")
+    if args.validator is None:
+        validators = participants.get("validators")
+        args.validator = validators if isinstance(validators, list) else None
     raw_invocation = effective.get("invocation")
     invocation: dict[str, Any] = raw_invocation if isinstance(raw_invocation, dict) else {}
     raw_unattended = invocation.get("unattended_invocation")
@@ -636,6 +802,7 @@ def consumed_config_values(args: argparse.Namespace, resolution: ConfigResolutio
         "participants.orchestrator": args.orchestrator,
         "participants.author": args.author,
         "participants.reviewers": args.reviewer,
+        "participants.validators": args.validator,
         "participants.human_supervisor": args.human_supervisor,
     }
     invocation = resolution.effective.get("invocation", {})
@@ -646,11 +813,20 @@ def consumed_config_values(args: argparse.Namespace, resolution: ConfigResolutio
     feedback = resolution.effective.get("feedback", {})
     if isinstance(feedback, dict) and "enabled" in feedback:
         consumed["feedback.enabled"] = bool(feedback["enabled"])
-    reviewer_clis = resolution.effective.get("reviewer_clis", {})
-    if isinstance(reviewer_clis, dict):
-        for reviewer in args.reviewer or []:
-            if reviewer in reviewer_clis:
-                consumed[f"reviewer_clis.{reviewer}.command"] = get_nested(reviewer_clis, f"{reviewer}.command")
+    for identity in [args.orchestrator, args.author, *(args.reviewer or []), *(args.validator or [])]:
+        binding = get_nested(resolution.effective, f"participant_identities.{identity}")
+        if isinstance(binding, dict):
+            consumed[f"participant_identities.{identity}"] = binding
+            participant_profile_id = binding.get("participant_profile_id")
+            execution_profile_id = binding.get("execution_profile_id")
+            if isinstance(participant_profile_id, str):
+                consumed[f"participant_profiles.{participant_profile_id}"] = get_nested(
+                    resolution.effective, f"participant_profiles.{participant_profile_id}"
+                )
+            if isinstance(execution_profile_id, str):
+                consumed[f"execution_profiles.{execution_profile_id}"] = get_nested(
+                    resolution.effective, f"execution_profiles.{execution_profile_id}"
+                )
     return {
         key: {
             "value": value,
@@ -664,6 +840,11 @@ def config_resolution_record(args: argparse.Namespace, run_id: str, created_at: 
     resolution: ConfigResolution | None = getattr(args, "config_resolution", None)
     if resolution is None:
         return ""
+    resolved_identities, resolved_execution_profiles, profile_errors = resolved_profile_payload(
+        resolution.effective
+    )
+    if profile_errors:
+        raise ValueError("invalid resolved participant profiles: " + "; ".join(profile_errors))
     data = {
         "record_type": "ConfigResolution",
         "schema_version": "m2-markdown-2",
@@ -675,13 +856,15 @@ def config_resolution_record(args: argparse.Namespace, run_id: str, created_at: 
         "cross_agent_consensus_version": CAC_VERSION,
         "sources": resolution.sources,
         "effective_values": consumed_config_values(args, resolution),
+        "resolved_participant_identities": resolved_identities,
+        "resolved_execution_profiles": resolved_execution_profiles,
         "diagnostics": {
             "warnings": resolution.warnings,
             "errors": resolution.errors,
         },
         "redactions": [
             {
-                "field": "reviewer_clis.*.env",
+                "field": "execution_profiles.*.env",
                 "rule": "env var names only; secret values are not recorded",
             }
         ],

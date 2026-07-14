@@ -30,6 +30,7 @@ from cross_agent_consensus.run_macro import (  # noqa: E402
     _build_plan,
     _emit_manual_fallback,
     _fallback_lines_for_plan,
+    _invocation_profile_for_actor,
     _resolve_actors,
     cmd_run,
 )
@@ -231,14 +232,21 @@ class ResolveActorsTests(unittest.TestCase):
 
         self.assertEqual(actors, ["codex"])
 
-    def test_validator_phase_uses_policy_required_validators(self) -> None:
+    def test_validator_phase_uses_participant_validator_identities(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run = _stage_run(tmp, reviewers=["codex"])
+            run_md = run / "run.md"
+            run_md.write_text(
+                run_md.read_text(encoding="utf-8").replace(
+                    "validator_identities: []",
+                    "validator_identities:\n  - validator-cli",
+                ),
+                encoding="utf-8",
+            )
             records = parse_run_records(run)
             actors = _resolve_actors(records, round_id="round-1", phase="validator", requested=None)
-        # document-consensus profile injects a default validator set
-        self.assertGreater(len(actors), 0)
+        self.assertEqual(actors, ["validator-cli"])
 
     def test_author_phase_uses_participants_author(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -253,11 +261,33 @@ class ResolveActorsTests(unittest.TestCase):
         self.assertEqual(actors, ["explicit"])
 
 
+class LegacyProfileResolutionTests(unittest.TestCase):
+    def test_legacy_codex_and_claude_commands_keep_structured_adapters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = _stage_run(Path(tmp_name), reviewers=["codex", "claude"])
+            _append_config_resolution(
+                run,
+                {
+                    "codex": ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
+                    "claude": ["claude", "-p", "--verbose", "--output-format", "stream-json"],
+                },
+            )
+            records = parse_run_records(run)
+
+            codex_profile = _invocation_profile_for_actor(records, "codex")
+            claude_profile = _invocation_profile_for_actor(records, "claude")
+
+        self.assertEqual(codex_profile[2], "codex-cli")
+        self.assertEqual(claude_profile[2], "claude-cli")
+
+
 class FallbackPrinterTests(unittest.TestCase):
 
     def _plan(self, runtime_command: list[str]) -> ActorPlan:
         return ActorPlan(
             actor="codex",
+            participant_profile_id="reviewer-default",
+            execution_profile_id="codex-reviewer-default",
             player="codex-cli",
             phase="reviewer",
             round_id="round-001",

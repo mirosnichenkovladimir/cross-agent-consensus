@@ -9,7 +9,7 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] `rounds/round-001/prompts/` and `rounds/round-001/raw/` exist before any host/manual invocation that can produce prompt or raw-output evidence.
 - [ ] `run.md` contains TaskBrief, Policy, Participants, and ReviewScope record sections.
 - [ ] Run metadata records `cross_agent_consensus_version`, `protocol_version`, and `layout_version`.
-- [ ] If saved configuration supplied defaults, `run.md` contains a ConfigResolution section with source paths, hashes for present config files, effective consumed values, and diagnostics.
+- [ ] If saved configuration supplied defaults, `run.md` contains a ConfigResolution section with source paths, hashes, effective consumed values, resolved Participant Identity and Execution Profile mappings, and diagnostics.
 - [ ] Required inputs are recorded: artifact locator, objective, success criteria, profile, scope, participants, round limits, required validators, Human Supervisor identity or `none`.
 - [ ] Orchestrator identity is distinct from Author and Reviewer identities.
 - [ ] `rounds/round-001/round.md` contains a ReviewBatch section with `review_mode`.
@@ -26,8 +26,8 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] Each first-round reviewer received only TaskBrief, Policy, ReviewScope, ReviewBatch mode, target ArtifactVersion, and role-specific prompt.
 - [ ] First-round reviewers did not receive other reviewers' findings before Raw Findings were emitted.
 - [ ] Every review file is scoped to one round and one reviewer: `rounds/round-NNN/reviews/<reviewer_identity>.md`.
-- [ ] If ConfigResolution lists `reviewer_clis.<reviewer>.command`, that reviewer's output came through `scripts/consensus invoke-agent` and has a completed `rounds/round-NNN/agents/<reviewer>/session-*` session.
-- [ ] OperatorApproval binds each launched actor's exact prompt, argv, and readable local ArtifactVersion digest.
+- [ ] If ConfigResolution binds a reviewer to a non-manual Execution Profile with argv, that reviewer's output came through `scripts/consensus invoke-agent` and has a completed `rounds/round-NNN/agents/<reviewer>/session-*` session.
+- [ ] OperatorApproval binds each launched Participant Identity, Participant Profile, Execution Profile, exact prompt, argv, and readable local ArtifactVersion digest.
 
 ## Raw And Normalized Findings
 

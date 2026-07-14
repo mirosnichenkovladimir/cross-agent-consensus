@@ -98,15 +98,16 @@ See `references/invocation.md` for the per-host peek-loop sketch.
 
 The approval gate lives in code (`--approved` is mandatory before any named CLI launch); the handshake lives here so the operator always knows what is about to run.
 
-Before launch, the CLI records `approval_binding_version: exact-inputs-1` and
-binds the approved prompt, argv, and working directory. A readable local
-ArtifactVersion is bound by its current content digest. Editing the prompt or
-artifact invalidates that approval; regenerate the prompt when needed and ask
-for approval again.
+Before launch, the CLI records `approval_binding_version: exact-inputs-2` and
+binds the Participant Identity, Participant Profile, Execution Profile,
+approved prompt, argv, and working directory. A readable local ArtifactVersion
+is bound by its current content digest. Editing the prompt, command, profile
+binding, or artifact invalidates that approval; regenerate the prompt when
+needed and ask for approval again.
 
 ## M2 Boundary
 
-This package is a design/manual-protocol implementation only. Do not create an automatic cross-runtime runner that executes without explicit participant selection, authorization, prompt capture, and raw-output capture. Do not invent model/provider selection, create JSON schemas, or apply reviewer suggestions directly to an artifact. When the user or Policy explicitly names a runtime/CLI as a participant, the Orchestrator MUST invoke that CLI/tool directly only after the run folder and exact prompt are recorded and either the operator has approved the command for this run or Policy declares `unattended_invocation: true` with scope limits. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not reasons to skip evidence. If these conditions are not met, write the exact manual command or prompt into the run folder and ask the operator to run it.
+This package is a design/manual-protocol implementation only. Do not create an automatic cross-runtime runner that executes without explicit participant selection, authorization, prompt capture, and raw-output capture. Do not infer or substitute a model/provider outside the recorded Execution Profile, and do not apply reviewer suggestions directly to an artifact. When the user or Policy explicitly names a runtime/CLI as a participant, the Orchestrator MUST invoke that CLI/tool directly only after the run folder and exact prompt are recorded and either the operator has approved the command for this run or Policy declares `unattended_invocation: true` with scope limits. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not reasons to skip evidence. If these conditions are not met, write the exact manual command or prompt into the run folder and ask the operator to run it.
 
 ## Out-Of-Box Invocation Contract
 
@@ -150,7 +151,7 @@ For first-class runtime telemetry, use structured stream modes:
 
 Before normalizing a named CLI reviewer result, check that `scripts/consensus agent-status --run <run> --actor <actor>` succeeds and points to the expected session. If it reports a missing session, rerun that reviewer through `invoke-agent` or explicitly record that the evidence was direct/manual capture without runtime telemetry.
 
-When ConfigResolution records a `reviewer_clis.<reviewer>.command` for a reviewer, that reviewer is a configured CLI reviewer. RawReviewerOutput for configured CLI reviewers is not terminally valid unless a completed `rounds/<round>/agents/<reviewer>/session-*` invocation session exists.
+When ConfigResolution binds a reviewer Participant Identity to a non-manual Execution Profile with argv, that reviewer is a configured CLI reviewer. RawReviewerOutput for configured CLI reviewers is not terminally valid unless a completed `rounds/<round>/agents/<reviewer>/session-*` invocation session exists.
 
 No participant output is protocol evidence until it is materialized in the run folder. Regardless of how the Orchestrator invokes another entity, including a local subagent, host tool, external CLI, manual human handoff, or background session, the Orchestrator must create the appropriate durable artifact before using that output for normalization, author response, validation, re-review, or termination. At minimum, preserve the exact prompt when applicable, raw output under the active round's `raw/` directory or an immutable lifecycle record, and the corresponding protocol record such as `RawReviewerOutput`, `ValidationEvidence`, `ArtifactVersion`, or `ReReviewDecision`.
 
@@ -204,7 +205,7 @@ Use these commands for configuration:
 - `scripts/consensus config paths`;
 - `scripts/consensus config setup [--dry-run]`.
 
-Persistent installed, user-local, and project config must not enable unattended invocation. Reviewer CLI mappings are argv arrays and are defaults for explicit invocation only; `invocation-ready` must still pass and the prompt/raw-output paths must be recorded before any external reviewer CLI is run. `consensus init` records a `ConfigResolution` section in `run.md` before any config-derived value is used.
+Configuration schema `cross-agent-consensus-config-2` separates `participant_profiles`, `execution_profiles`, and `participant_identities`. A Participant Identity may select another Execution Profile without changing its protocol name. Persistent installed, user-local, and project config must not contain secret values or enable unattended invocation. `model` and `reasoning_effort` are translated into provider-specific argv; conflicting duplicate argv declarations are rejected. Participant Profile instructions are copied into finalized prompts and remain subordinate to CAC Policy, ReviewScope, and phase output requirements. Child CLIs receive only environment-variable names declared by the Execution Profile, while values remain unrecorded. Execution Profile argv is a preset for explicit invocation only; `invocation-ready` must still pass and the prompt/raw-output paths must be recorded before any external reviewer CLI is run. `consensus init` records the resolved identity/profile mapping and effective commands in `ConfigResolution` before any config-derived value is used. Schema `cross-agent-consensus-config-1` and `reviewer_clis` are accepted with deprecation warnings in 0.12.x and are scheduled for removal in 0.13.0.
 
 ## Terse Invocation Behavior
 

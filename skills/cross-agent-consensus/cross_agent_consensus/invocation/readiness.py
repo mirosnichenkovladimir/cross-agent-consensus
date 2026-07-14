@@ -10,6 +10,7 @@ from pathlib import Path
 from cross_agent_consensus.io import eprint, slugify
 from cross_agent_consensus.layout import DEFAULT_LAYOUT, detect_run_layout, round_dir, round_number
 from cross_agent_consensus.models import InvocationCommandInput, InvocationReadyInput, Record
+from cross_agent_consensus.profiles import bind_recorded_invocation_profile
 from cross_agent_consensus.records import first_record, parse_run_snapshot, records_by_type
 from cross_agent_consensus.validation import check_participants, check_pre_execution
 
@@ -177,6 +178,21 @@ def secret_argv_errors(command: list[str]) -> list[str]:
             errors.append(f"argv token {index} appears to contain a bearer token")
         if re.search(r"\bbearer\s+\S+", arg, re.IGNORECASE):
             errors.append(f"argv token {index} appears to contain a bearer token")
+        assignment = arg
+        for prefix in ("--env=", "-e="):
+            if assignment.startswith(prefix):
+                assignment = assignment[len(prefix):]
+                break
+        assignment_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", assignment)
+        if (
+            assignment_match
+            and assignment_match.group(2)
+            and SECRET_FLAG_RE.search(assignment_match.group(1).lower())
+        ):
+            errors.append(
+                f"argv token {index} passes a secret-looking value in environment assignment "
+                f"{assignment_match.group(1)}"
+            )
         if not arg.startswith("--"):
             continue
         flag, separator, value = arg[2:].partition("=")
@@ -186,6 +202,28 @@ def secret_argv_errors(command: list[str]) -> list[str]:
             elif index + 1 < len(command) and not command[index + 1].startswith("--"):
                 errors.append(f"argv token {index} passes a secret-looking value via the next argv token")
     return errors
+
+
+def inferred_invocation_phase(args: InvocationReadyInput) -> str | None:
+    explicit = getattr(args, "phase", None)
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    prompt = Path(args.prompt)
+    if prompt.is_file():
+        for line in prompt.read_text(encoding="utf-8", errors="replace").splitlines()[:12]:
+            match = re.fullmatch(r"Phase: `([^`]+)`", line.strip())
+            if match:
+                return match.group(1)
+    parts = set(prompt.parts)
+    if "reviewers" in parts:
+        return "reviewer"
+    if "rereviews" in parts:
+        return "rereview"
+    if "validators" in parts:
+        return "validator"
+    if prompt.name.startswith("author"):
+        return "author"
+    return None
 
 
 def reviewer_prompt_completeness_errors(
@@ -311,6 +349,9 @@ def invocation_ready_errors(run: Path, args: InvocationReadyInput, command: list
     records = snapshot.records
     participants = first_record(records, "Participants")
     messages: list[str] = []
+    setattr(args, "phase", inferred_invocation_phase(args))
+    _, profile_messages = bind_recorded_invocation_profile(records, args, command)
+    messages.extend(profile_messages)
     for name, result in [
         ("pre-execution", check_pre_execution(run, snapshot)),
         ("participants", check_participants(run, snapshot)),
@@ -322,6 +363,7 @@ def invocation_ready_errors(run: Path, args: InvocationReadyInput, command: list
         known.add(str(participants.data.get("orchestrator_identity")))
         known.add(str(participants.data.get("author_identity")))
         known.update(str(value) for value in participants.data.get("reviewer_identities") or [])
+        known.update(str(value) for value in participants.data.get("validator_identities") or [])
     if args.actor not in known:
         messages.append(f"actor is not recorded as a participant: {args.actor}")
     messages.extend(reviewer_prompt_completeness_errors(run, args, participants, records))
@@ -366,7 +408,11 @@ def invoke_agent_round_path_errors(run: Path, args: InvocationCommandInput) -> l
 def cmd_invocation_ready(args: InvocationReadyInput) -> int:
     run = Path(args.run)
     command = runtime_command(args.command)
+    command, profile_messages = bind_recorded_invocation_profile(
+        parse_run_snapshot(run).records, args, command
+    )
     messages = invocation_ready_errors(run, args, command)
+    messages = profile_messages + messages
     if messages:
         for message in messages:
             eprint(f"error: {message}")

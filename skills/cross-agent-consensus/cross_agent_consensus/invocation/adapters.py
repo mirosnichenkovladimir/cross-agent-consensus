@@ -46,9 +46,9 @@ class GenericCliPlayer:
         return CommandSpec(
             argv=invocation.command,
             cwd=invocation.cwd,
-            prompt_transport="stdin",
-            output_mode="raw_stdout",
-            env_allowlist=[],
+            prompt_transport=invocation.prompt_transport,
+            output_mode=invocation.output_mode,
+            env_allowlist=invocation.env_allowlist,
             executable_probe={
                 "executable": capabilities.executable,
                 "path": capabilities.executable_path_or_null,
@@ -91,9 +91,7 @@ class StructuredJsonCliPlayer(GenericCliPlayer):
         )
 
     def build_command(self, invocation: AgentInvocation) -> CommandSpec:
-        spec = super().build_command(invocation)
-        spec.output_mode = "stream_json" if self.command_requests_json(invocation.command) else "raw_stdout"
-        return spec
+        return super().build_command(invocation)
 
     def command_requests_json(self, command: list[str]) -> bool:
         return False

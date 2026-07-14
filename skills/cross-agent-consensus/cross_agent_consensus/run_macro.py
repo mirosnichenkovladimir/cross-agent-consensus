@@ -15,9 +15,9 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from cross_agent_consensus.invocation.adapters import PLAYER_ALIASES
 from cross_agent_consensus import capture
 from cross_agent_consensus.approval import approval_binding, stamp_operator_approval
+from cross_agent_consensus.config import legacy_adapter_for_command
 from cross_agent_consensus.invocation import process_monitor
 from cross_agent_consensus.invocation.process_monitor import (
     DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
@@ -40,6 +40,7 @@ from cross_agent_consensus.models import (
 )
 from cross_agent_consensus.prompt_command import cmd_prompt
 from cross_agent_consensus.prompts import prompt_target, raw_output_target
+from cross_agent_consensus.profiles import invocation_profile_from_records
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
 
 
@@ -53,6 +54,8 @@ class ActorPlan:
     """
 
     actor: str
+    participant_profile_id: str
+    execution_profile_id: str
     player: str
     phase: str
     round_id: str
@@ -85,8 +88,10 @@ def _resolve_actors(
     if phase == "author":
         return [str(participants.data["author_identity"])] if participants else []
     if phase == "validator":
-        policy = first_record(records, "Policy")
-        return [str(value) for value in policy.data.get("required_validator_ids") or []] if policy else []
+        return [
+            str(value)
+            for value in (participants.data.get("validator_identities") or [])
+        ] if participants else []
     if phase in ("reviewer", "rereview"):
         batches = _round_review_batches(records, round_id)
         active = batches[-1] if batches else None
@@ -103,18 +108,7 @@ def _resolve_actors(
 # ---------------------------------------------------------------------------
 
 
-def _player_for_actor(actor: str) -> str:
-    """Map an actor identity to a player id; falls back to generic-cli."""
-
-    resolved_player_id = PLAYER_ALIASES.get(actor)
-    if resolved_player_id:
-        return resolved_player_id
-    if actor in ("manual",):
-        return "manual"
-    return "generic-cli"
-
-
-def _runtime_command_for_actor(records: list[Record], actor: str) -> list[str]:
+def _legacy_runtime_command_for_actor(records: list[Record], actor: str) -> list[str]:
     """Extract ``reviewer_clis.<actor>.command`` from the ConfigResolution record.
 
     ConfigResolution.effective_values is a dict keyed by ``<group>.<key>`` with
@@ -138,6 +132,27 @@ def _runtime_command_for_actor(records: list[Record], actor: str) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return []
+
+
+def _invocation_profile_for_actor(
+    records: list[Record], actor: str
+) -> tuple[str, str, str, list[str]]:
+    profile = invocation_profile_from_records(records, actor)
+    if profile is not None:
+        return (
+            profile.participant_profile_id,
+            profile.execution_profile_id,
+            profile.adapter_id,
+            profile.command,
+        )
+    command = _legacy_runtime_command_for_actor(records, actor)
+    player = "manual" if actor == "manual" else legacy_adapter_for_command(command)[0]
+    return (
+        "legacy-inline-participant-profile",
+        f"legacy-inline-{actor}-execution-profile",
+        player,
+        command,
+    )
 
 
 def _single_or_none(records: list[Record], record_type: str, id_field: str) -> str | None:
@@ -196,15 +211,20 @@ def _build_plan(
         force_draft=False,
         dry_run=False,
     )
+    participant_profile_id, execution_profile_id, player, runtime_command = (
+        _invocation_profile_for_actor(records, actor)
+    )
     return ActorPlan(
         actor=actor,
-        player=_player_for_actor(actor),
+        participant_profile_id=participant_profile_id,
+        execution_profile_id=execution_profile_id,
+        player=player,
         phase=phase,
         round_id=round_id,
         prompt_path=prompt_target(run, prompt_args, records),
         raw_output_path=raw_output_target(run, prompt_args, records),
         cwd=cwd,
-        runtime_command=_runtime_command_for_actor(records, actor),
+        runtime_command=runtime_command,
         idle_timeout_seconds=idle_timeout_seconds,
         stale_timeout_seconds=stale_timeout_seconds,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
@@ -268,6 +288,8 @@ def _run_readiness(run: Path, *, plans: list[ActorPlan]) -> dict[str, list[str]]
             run=str(run),
             actor=plan.actor,
             player=plan.player,
+            participant_profile_id=plan.participant_profile_id,
+            execution_profile_id=plan.execution_profile_id,
             prompt=str(plan.prompt_path),
             raw_output=str(plan.raw_output_path),
             approved=True,  # macro passes its own --approved through to readiness
@@ -277,7 +299,7 @@ def _run_readiness(run: Path, *, plans: list[ActorPlan]) -> dict[str, list[str]]
         if not plan.runtime_command:
             errors.append(
                 f"no runtime command configured for actor {plan.actor!r}; "
-                f"set reviewer_clis.{plan.actor}.command in config or pass it via task-file"
+                f"bind participant_identities.{plan.actor}.execution_profile_id to an ExecutionProfile with argv"
             )
         per_actor[plan.actor] = errors
     return per_actor
@@ -306,6 +328,8 @@ def _launch_all(
             phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
             actor=plan.actor,
             player=plan.player,
+            participant_profile_id=plan.participant_profile_id,
+            execution_profile_id=plan.execution_profile_id,
             prompt=str(plan.prompt_path),
             raw_output=str(plan.raw_output_path),
             cwd=plan.cwd,
@@ -406,6 +430,8 @@ def _fallback_lines_for_plan(plan: ActorPlan) -> list[str]:
         f"--phase {plan.phase if plan.phase in ('author', 'reviewer', 'validator', 'manual') else 'reviewer'}",
         f"--actor {shlex.quote(plan.actor)}",
         f"--player {shlex.quote(plan.player)}",
+        f"--participant-profile {shlex.quote(plan.participant_profile_id)}",
+        f"--execution-profile {shlex.quote(plan.execution_profile_id)}",
         f"--prompt {shlex.quote(str(plan.prompt_path))}",
         f"--raw-output {shlex.quote(str(plan.raw_output_path))}",
         f"--cwd {shlex.quote(plan.cwd)}",
@@ -552,7 +578,9 @@ def cmd_run(args: RunCommandInput) -> int:
             approval_binding(
                 run,
                 records,
-                actor_identity=plan.actor,
+                participant_identity=plan.actor,
+                participant_profile_id=plan.participant_profile_id,
+                execution_profile_id=plan.execution_profile_id,
                 player_id=plan.player,
                 phase=plan.phase if plan.phase in ("author", "reviewer", "validator", "manual") else "reviewer",
                 round_id=round_id,

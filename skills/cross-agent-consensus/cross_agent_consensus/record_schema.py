@@ -281,6 +281,7 @@ LIST_FIELDS = {
     "required_validator_ids",
     "review_modes_allowed",
     "reviewer_identities",
+    "validator_identities",
     "source_finding_ids",
     "source_raw_finding_ids",
     "sources",
@@ -347,6 +348,9 @@ OPTIONAL_FIELD_TYPES: dict[str, tuple[type[object], ...]] = {
     "prompt_sha256_or_null": (str, NoneType),
     "approval_binding_version": (str,),
     "approved_invocations": (list,),
+    "resolved_participant_identities": (dict,),
+    "resolved_execution_profiles": (dict,),
+    "validator_identities": (list,),
 }
 
 

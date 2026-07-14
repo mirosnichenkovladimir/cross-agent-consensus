@@ -85,10 +85,34 @@ def _payload_path(run: Path, value: Any, field: str) -> Path:
     return run / relative
 
 
+def resolved_execution_profile_sha256(
+    records: list[Record], execution_profile_id: str
+) -> str | None:
+    """Hash the resolved ExecutionProfile recorded for one participant."""
+
+    for record in records_by_type(records, "ConfigResolution"):
+        profiles = record.data.get("resolved_execution_profiles")
+        if not isinstance(profiles, dict):
+            continue
+        profile = profiles.get(execution_profile_id)
+        if isinstance(profile, dict):
+            return canonical_json_sha256(profile)
+    return None
+
+
+def config_uses_execution_profiles(records: list[Record]) -> bool:
+    return any(
+        record.data.get("config_schema_version") == "cross-agent-consensus-config-2"
+        for record in records_by_type(records, "ConfigResolution")
+    )
+
+
 def _approval_covers_session(
     records: list[Record],
     *,
-    actor_identity: str,
+    participant_identity: str,
+    participant_profile_id: str | None = None,
+    execution_profile_id: str | None = None,
     player_id: str,
     phase: str,
     round_id: str,
@@ -100,7 +124,7 @@ def _approval_covers_session(
     artifact_sha256: str | None,
 ) -> bool:
     session_binding = {
-        "actor_identity": actor_identity,
+        "participant_identity": participant_identity,
         "player_id": player_id,
         "phase": phase,
         "round_id": normalize_round_id(round_id),
@@ -111,6 +135,15 @@ def _approval_covers_session(
         "artifact_version_id_or_null": artifact_version_id,
         "artifact_sha256_or_null": artifact_sha256,
     }
+    if participant_profile_id is not None:
+        session_binding["participant_profile_id"] = participant_profile_id
+    if execution_profile_id is not None:
+        session_binding["execution_profile_id"] = execution_profile_id
+        execution_profile_digest = resolved_execution_profile_sha256(
+            records, execution_profile_id
+        )
+        if execution_profile_digest is not None:
+            session_binding["execution_profile_sha256_or_null"] = execution_profile_digest
     for approval in records_by_type(records, "OperatorApproval"):
         bindings = approval.data.get("approved_invocations")
         if not isinstance(bindings, list):
@@ -118,7 +151,10 @@ def _approval_covers_session(
         for binding in bindings:
             if not isinstance(binding, dict):
                 continue
-            if all(binding.get(field) == value for field, value in session_binding.items()):
+            comparable_binding = dict(binding)
+            if "participant_identity" not in comparable_binding and "actor_identity" in comparable_binding:
+                comparable_binding["participant_identity"] = comparable_binding["actor_identity"]
+            if all(comparable_binding.get(field) == value for field, value in session_binding.items()):
                 return True
     return False
 
@@ -128,7 +164,7 @@ def live_session_messages(
     records: list[Record],
     record: Record,
     *,
-    actor_identity: str,
+    participant_identity: str,
     phase: str,
     artifact_version_id: str,
 ) -> list[str]:
@@ -153,7 +189,8 @@ def live_session_messages(
     except (OSError, ValueError) as exc:
         return [f"{prefix}: supervised session records are unreadable: {exc}"]
     messages: list[str] = []
-    if invocation.get("session_id") != session_id or invocation.get("actor_identity") != actor_identity:
+    recorded_identity = invocation.get("participant_identity", invocation.get("actor_identity"))
+    if invocation.get("session_id") != session_id or recorded_identity != participant_identity:
         messages.append(f"{prefix}: supervised session identity does not match evidence")
     if invocation.get("phase") != phase:
         messages.append(f"{prefix}: supervised session phase does not match evidence")
@@ -200,7 +237,7 @@ def live_session_messages(
                 PromptCommandInput(
                     run=str(run),
                     phase="reviewer",
-                    actor=actor_identity,
+                    actor=participant_identity,
                     round=str(batch.data.get("round_id") or "round-1"),
                     review_batch=review_batch_id,
                     artifact_version=artifact_version_id,
@@ -220,6 +257,8 @@ def live_session_messages(
         return messages
     digest = command_sha256(argv)
     session_player = str(invocation.get("player_id") or "")
+    participant_profile_id = invocation.get("participant_profile_id")
+    execution_profile_id = invocation.get("execution_profile_id")
     session_cwd = str(command_payload.get("cwd") or "")
     run_version = recorded_run_version(run)
     requires_session_evidence = (
@@ -275,7 +314,13 @@ def live_session_messages(
             messages.append(f"{prefix}: {exc}")
     if not _approval_covers_session(
         records,
-        actor_identity=actor_identity,
+        participant_identity=participant_identity,
+        participant_profile_id=(
+            str(participant_profile_id) if isinstance(participant_profile_id, str) else None
+        ),
+        execution_profile_id=(
+            str(execution_profile_id) if isinstance(execution_profile_id, str) else None
+        ),
         player_id=session_player,
         phase=phase,
         round_id=normalized_session_round,
@@ -329,7 +374,7 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
                 run,
                 records,
                 record,
-                actor_identity=str(record.data.get("reviewer_identity") or ""),
+                participant_identity=str(record.data.get("reviewer_identity") or ""),
                 phase="reviewer",
                 artifact_version_id=str(record.data.get("artifact_version_id") or ""),
             )
@@ -359,7 +404,7 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
                 run,
                 records,
                 record,
-                actor_identity=str(record.data.get("produced_by") or ""),
+                participant_identity=str(record.data.get("produced_by") or ""),
                 phase="validator",
                 artifact_version_id=str(record.data.get("target_artifact_version_id") or ""),
             )
@@ -376,9 +421,10 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
             if not isinstance(binding, dict):
                 messages.append(f"{record.path}:{record.heading_line}: approved_invocations entries must be mappings")
                 continue
-            actor = str(binding.get("actor_identity") or "unknown")
-            for field in (
-                "actor_identity",
+            participant = str(
+                binding.get("participant_identity") or binding.get("actor_identity") or "unknown"
+            )
+            required_binding_fields = [
                 "player_id",
                 "phase",
                 "round_id",
@@ -386,18 +432,42 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
                 "prompt_sha256",
                 "command_sha256",
                 "working_directory",
-            ):
+            ]
+            if record.data.get("approval_binding_version") == "exact-inputs-2":
+                required_binding_fields.extend(
+                    ["participant_identity", "participant_profile_id", "execution_profile_id"]
+                )
+                if config_uses_execution_profiles(records):
+                    required_binding_fields.append("execution_profile_sha256_or_null")
+            else:
+                required_binding_fields.append("actor_identity")
+            for field in required_binding_fields:
                 if not isinstance(binding.get(field), str) or not binding.get(field):
                     messages.append(
-                        f"{record.path}:{record.heading_line}: approval binding for {actor} lacks {field}"
+                        f"{record.path}:{record.heading_line}: approval binding for {participant} lacks {field}"
                     )
             prompt_path = binding.get("prompt_path")
             prompt_sha = binding.get("prompt_sha256")
             if not isinstance(prompt_path, str) or not isinstance(prompt_sha, str):
-                messages.append(f"{record.path}:{record.heading_line}: approval binding for {actor} lacks prompt path/sha256")
+                messages.append(f"{record.path}:{record.heading_line}: approval binding for {participant} lacks prompt path/sha256")
                 continue
             if not SHA256_RE.fullmatch(prompt_sha) or not SHA256_RE.fullmatch(str(binding.get("command_sha256") or "")):
-                messages.append(f"{record.path}:{record.heading_line}: approval binding for {actor} has invalid sha256")
+                messages.append(f"{record.path}:{record.heading_line}: approval binding for {participant} has invalid sha256")
+            execution_profile_id = binding.get("execution_profile_id")
+            approved_execution_profile_sha = binding.get("execution_profile_sha256_or_null")
+            if isinstance(execution_profile_id, str) and config_uses_execution_profiles(records):
+                current_execution_profile_sha = resolved_execution_profile_sha256(
+                    records, execution_profile_id
+                )
+                if (
+                    not isinstance(approved_execution_profile_sha, str)
+                    or not SHA256_RE.fullmatch(approved_execution_profile_sha)
+                    or current_execution_profile_sha != approved_execution_profile_sha
+                ):
+                    messages.append(
+                        f"{record.path}:{record.heading_line}: approval ExecutionProfile sha256 differs "
+                        f"for {participant}: {execution_profile_id}"
+                    )
             try:
                 approved_prompt = _payload_path(run, prompt_path, "prompt_path")
             except ValueError as exc:
@@ -405,24 +475,24 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
                 continue
             if not approved_prompt.is_file():
                 messages.append(
-                    f"{record.path}:{record.heading_line}: approved prompt not found for {actor}: {prompt_path}"
+                    f"{record.path}:{record.heading_line}: approved prompt not found for {participant}: {prompt_path}"
                 )
             elif sha256_file(approved_prompt) != prompt_sha:
                 messages.append(
-                    f"{record.path}:{record.heading_line}: approved prompt sha256 mismatch for {actor}: {prompt_path}"
+                    f"{record.path}:{record.heading_line}: approved prompt sha256 mismatch for {participant}: {prompt_path}"
                 )
             artifact_id = binding.get("artifact_version_id_or_null")
             approved_artifact_sha = binding.get("artifact_sha256_or_null")
             if approved_artifact_sha is not None and (
                 not isinstance(approved_artifact_sha, str) or not SHA256_RE.fullmatch(approved_artifact_sha)
             ):
-                messages.append(f"{record.path}:{record.heading_line}: approval artifact sha256 is invalid for {actor}")
+                messages.append(f"{record.path}:{record.heading_line}: approval artifact sha256 is invalid for {participant}")
                 continue
             if isinstance(artifact_id, str) and approved_artifact_sha is not None:
                 artifact = artifact_by_id(records, artifact_id)
                 if artifact is None:
                     messages.append(
-                        f"{record.path}:{record.heading_line}: approved artifact not found for {actor}: {artifact_id}"
+                        f"{record.path}:{record.heading_line}: approved artifact not found for {participant}: {artifact_id}"
                     )
                     continue
                 try:
@@ -432,7 +502,7 @@ def integrity_messages(run: Path, records: list[Record]) -> list[str]:
                     continue
                 if current_artifact_sha != approved_artifact_sha:
                     messages.append(
-                        f"{record.path}:{record.heading_line}: approved artifact sha256 differs for {actor}: {artifact_id}"
+                        f"{record.path}:{record.heading_line}: approved artifact sha256 differs for {participant}: {artifact_id}"
                     )
 
     messages.extend(approval_anchor_messages(run, records))

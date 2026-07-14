@@ -204,6 +204,21 @@ def conclusion_validation_ordering_messages(records: list[Record]) -> list[str]:
 def cli_mapped_reviewer_identities(records: list[Record]) -> set[str]:
     reviewers: set[str] = set()
     for record in records_by_type(records, "ConfigResolution"):
+        identities = record.data.get("resolved_participant_identities")
+        profiles = record.data.get("resolved_execution_profiles")
+        if isinstance(identities, dict) and isinstance(profiles, dict):
+            for identity, binding in identities.items():
+                if not isinstance(identity, str) or not isinstance(binding, dict):
+                    continue
+                if binding.get("role") != "reviewer":
+                    continue
+                execution_profile_id = binding.get("execution_profile_id")
+                execution = profiles.get(execution_profile_id)
+                if not isinstance(execution, dict):
+                    continue
+                command = execution.get("command")
+                if execution.get("adapter_id") != "manual" and isinstance(command, list) and command:
+                    reviewers.add(identity)
         values = record.data.get("effective_values")
         if not isinstance(values, dict):
             continue
@@ -280,7 +295,7 @@ def reviewer_cli_invocation_messages(run: Path, records: list[Record]) -> list[s
                 run,
                 records,
                 record,
-                actor_identity=reviewer,
+                participant_identity=reviewer,
                 phase="reviewer",
                 artifact_version_id=str(record.data.get("artifact_version_id") or ""),
             )
@@ -340,6 +355,15 @@ def check_records(run: Path, snapshot: RunSnapshot | None = None) -> CheckResult
                     f"{record.path}:{record.heading_line}: {record.record_type}.{field} must be "
                     f"{optional_type_label(field)}, got {type(value).__name__}"
                 )
+        if (
+            record.record_type == "ConfigResolution"
+            and record.data.get("config_schema_version") == "cross-agent-consensus-config-2"
+        ):
+            for field in ["resolved_participant_identities", "resolved_execution_profiles"]:
+                if required_field_missing(record.data, field):
+                    messages.append(
+                        f"{record.path}:{record.heading_line}: ConfigResolution missing field {field}"
+                    )
         unique = f"{record.record_type}:{record.record_id}"
         if unique in seen_ids:
             messages.append(f"{record.path}:{record.heading_line}: duplicate record id {unique}")
@@ -379,6 +403,7 @@ def check_participants(run: Path, snapshot: RunSnapshot | None = None) -> CheckR
     orchestrator = data.get("orchestrator_identity")
     author = data.get("author_identity")
     reviewers = data.get("reviewer_identities") or []
+    validators = data.get("validator_identities") or []
     messages: list[str] = []
     if orchestrator == author:
         messages.append("orchestrator_identity must be distinct from author_identity")
@@ -386,6 +411,12 @@ def check_participants(run: Path, snapshot: RunSnapshot | None = None) -> CheckR
         messages.append("orchestrator_identity must be distinct from reviewer identities")
     if len(set(reviewers)) != len(reviewers):
         messages.append("reviewer identities must be unique")
+    if len(set(validators)) != len(validators):
+        messages.append("validator identities must be unique")
+    if set(reviewers) & set(validators):
+        messages.append("reviewer identities must be distinct from validator identities")
+    if orchestrator in validators or author in validators:
+        messages.append("validator identities must be distinct from orchestrator_identity and author_identity")
     return CheckResult(not messages, messages or ["participant checks passed"])
 
 

@@ -22,6 +22,7 @@ from cross_agent_consensus.models import (
     PromptCommandInput,
     Record,
 )
+from cross_agent_consensus.profiles import participant_phase_role_errors
 from cross_agent_consensus.records import first_record, records_by_type
 
 
@@ -288,7 +289,41 @@ def conclusion_validation_table(records: list[Record], batch: Record) -> list[st
     return rows
 
 
+def participant_profile_prompt_lines(records: list[Record], actor: str | None) -> list[str]:
+    """Render the ParticipantProfile bound in the immutable ConfigResolution snapshot."""
+
+    if not actor:
+        return []
+    resolution = first_record(records, "ConfigResolution")
+    if resolution is None:
+        return []
+    identities = resolution.data.get("resolved_participant_identities")
+    if not isinstance(identities, dict):
+        return []
+    binding = identities.get(actor)
+    if not isinstance(binding, dict):
+        return []
+    profile_id = binding.get("participant_profile_id")
+    role = binding.get("role")
+    instructions = binding.get("instructions")
+    if not isinstance(profile_id, str) or not isinstance(role, str) or not isinstance(instructions, list):
+        return []
+    lines = [
+        "## ParticipantProfile",
+        "",
+        f"- Profile: {profile_id}",
+        f"- Role: {role}",
+        "- Profile instructions refine this role; CAC Policy, ReviewScope, and phase output requirements take precedence.",
+    ]
+    lines.extend(f"- Instruction: {instruction}" for instruction in instructions if isinstance(instruction, str))
+    lines.append("")
+    return lines
+
+
 def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
+    role_errors = participant_phase_role_errors(records, args.actor or "", args.phase)
+    if role_errors:
+        raise ValueError(role_errors[0])
     task = first_record(records, "TaskBrief")
     policy = first_record(records, "Policy")
     scope = first_record(records, "ReviewScope")
@@ -302,6 +337,7 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
         f"Phase: `{args.phase}`",
         "",
     ]
+    lines.extend(participant_profile_prompt_lines(records, args.actor))
     if task:
         lines.extend(
             [

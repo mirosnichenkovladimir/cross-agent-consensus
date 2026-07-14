@@ -20,12 +20,12 @@ from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths, Com
 
 from .session_paths import path_for_json, session_relative
 
-AGENT_INVOCATION_SCHEMA = "cross-agent-consensus-invocation-1"
+AGENT_INVOCATION_SCHEMA = "cross-agent-consensus-invocation-2"
 AGENT_COMMAND_SCHEMA = "cross-agent-consensus-command-1"
 AGENT_STATE_SCHEMA = "cross-agent-consensus-state-1"
 AGENT_EXIT_SCHEMA = "cross-agent-consensus-exit-1"
-AGENT_EVENT_SCHEMA = "cross-agent-consensus-agent-event-1"
-AGENT_LOG_SCHEMA = "cross-agent-consensus-agent-log-1"
+AGENT_EVENT_SCHEMA = "cross-agent-consensus-agent-event-2"
+AGENT_LOG_SCHEMA = "cross-agent-consensus-agent-log-2"
 AGENT_STATUS_SCHEMA = "cross-agent-consensus-agent-status-1"
 
 
@@ -35,7 +35,9 @@ def agent_event(invocation: AgentInvocation, event_type: str, **extra: Any) -> d
         "ts": utc_now(),
         "run_id": invocation.run.name,
         "round_id": invocation.round_id,
-        "actor_identity": invocation.actor_identity,
+        "participant_identity": invocation.participant_identity,
+        "participant_profile_id": invocation.participant_profile_id,
+        "execution_profile_id": invocation.execution_profile_id,
         "player_id": invocation.player_id,
         "session_id": invocation.session_id,
         "type": event_type,
@@ -63,7 +65,9 @@ def append_agent_log_entry(
         "ts": utc_now(),
         "run_id": invocation.run.name,
         "round_id": invocation.round_id,
-        "actor_identity": invocation.actor_identity,
+        "participant_identity": invocation.participant_identity,
+        "participant_profile_id": invocation.participant_profile_id,
+        "execution_profile_id": invocation.execution_profile_id,
         "player_id": invocation.player_id,
         "session_id": invocation.session_id,
         "stream": stream,
@@ -176,8 +180,11 @@ def write_invocation_json(paths: AgentSessionPaths, invocation: AgentInvocation)
             "run_id": invocation.run.name,
             "round_id": invocation.round_id,
             "phase": invocation.phase,
-            "actor_identity": invocation.actor_identity,
+            "participant_identity": invocation.participant_identity,
+            "participant_profile_id": invocation.participant_profile_id,
+            "execution_profile_id": invocation.execution_profile_id,
             "player_id": invocation.player_id,
+            "effective_command": invocation.command,
             "session_id": invocation.session_id,
             "prompt_source_path": path_for_json(invocation.prompt_path, invocation.run),
             "prompt_sha256": prompt_sha,

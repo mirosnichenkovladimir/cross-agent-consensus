@@ -163,14 +163,14 @@ runs/<run_id>/
 | `AbortRecord` | `abort_record_id`, `trigger_actor`, `reason`, `artifact_version_id_or_null`, `unresolved_finding_ids` |
 | `TerminationRecord` | `termination_record_id`, `terminal_condition`, `reason`, `final_artifact_version_id_or_null`, `unresolved_finding_ids`, `supporting_record_ids` |
 | `FinalReport` | `final_report_id`, `termination_record_id`, `terminal_condition`, `final_artifact_version_id_or_null`, `validator_status`, `unresolved_finding_ids`, `backlog_path` |
-| `ConfigResolution` | `config_resolution_id`, `config_schema_version`, `sources`, `effective_values`, `diagnostics`, `redactions` |
-| `OperatorApproval` | `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, `operator_identity_or_null`; CLI-created approvals also record `approval_binding_version: exact-inputs-1` and `approved_invocations` |
+| `ConfigResolution` | `config_resolution_id`, `config_schema_version`, `sources`, `effective_values`, `resolved_participant_identities`, `resolved_execution_profiles`, `diagnostics`, `redactions` |
+| `OperatorApproval` | `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, `operator_identity_or_null`; current CLI-created approvals also record `approval_binding_version: exact-inputs-2` and `approved_invocations` keyed by `participant_identity`, `participant_profile_id`, and `execution_profile_id` |
 
 ReviewBatch sections may use optional frontmatter `review_focus` to record review lenses or emphasis areas. `review_focus` never changes Participants and must not be used as `reviewer_identity`.
 
 Conclusion-validation ReviewBatch sections use optional frontmatter `batch_purpose: conclusion_validation` and `expected_reviewer_identities` to name the recalled reviewers. A Policy section may use optional `skipped_conclusion_validation_batch_ids` to record conclusion-validation batches intentionally skipped by policy authority.
 
-When a ConfigResolution section contains `reviewer_clis.<reviewer>.command`, RawReviewerOutput from that reviewer is only terminally valid when the active round also contains a completed `rounds/round-NNN/agents/<reviewer>/session-*` invocation session for phase `reviewer`.
+When a ConfigResolution section binds a reviewer Participant Identity to a non-manual Execution Profile with argv, RawReviewerOutput from that reviewer is only terminally valid when the active round also contains a completed `rounds/round-NNN/agents/<reviewer>/session-*` invocation session for phase `reviewer`.
 
 `capture_origin` is one of `live_cli`, `manual_import`, `host_subagent`, or
 `stdin`. `live_cli` requires `session_id_or_null`, `session_path_or_null`, and
@@ -178,8 +178,8 @@ When a ConfigResolution section contains `reviewer_clis.<reviewer>.command`, Raw
 completed invocation. `exit.json` binds the digests of `invocation.json`,
 `command.json`, `prompt.md`, stdout, stderr, copied raw output, and extracted
 final output. The command digest and working directory must match an
-`approved_invocations` binding for the same actor, phase, prompt, and
-ArtifactVersion.
+`approved_invocations` binding for the same Participant Identity, Participant
+Profile, Execution Profile, phase, prompt, and ArtifactVersion.
 
 ## Run Mutation Journal
 
@@ -238,6 +238,6 @@ Managed update rules:
 
 ## Configuration Records
 
-When `consensus init` uses installed defaults, user-local config, project config, task-file config, or CLI overrides, it writes a `ConfigResolution` section in `run.md`. The record lists loaded and missing sources, source hashes for present files, effective consumed values with source layers, diagnostics, and redaction rules for future sensitive fields.
+When `consensus init` uses installed defaults, user-local config, project config, task-file config, or CLI overrides, it writes a `ConfigResolution` section in `run.md`. The record lists loaded and missing sources, source hashes, effective consumed values, resolved Participant Identity and Execution Profile mappings, diagnostics, and redaction rules for future sensitive fields.
 
-Persistent config files may provide deterministic defaults and reviewer CLI argv presets, but they must not enable unattended invocation. Run-scoped task files or CLI flags are the only valid places to request unattended invocation, and `invocation-ready` still gates external command execution.
+Persistent config files may provide Participant Profiles, Execution Profiles, and identity-to-profile bindings, but they must not contain secret values or enable unattended invocation. Run-scoped task files or CLI flags are the only valid places to request unattended invocation, and `invocation-ready` still gates external command execution.
