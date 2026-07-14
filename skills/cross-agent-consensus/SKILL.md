@@ -223,6 +223,13 @@ Use these commands for configuration:
 
 Configuration schema `cross-agent-consensus-config-2` separates `participant_profiles`, `execution_profiles`, and `participant_identities`. A Participant Identity may select another Execution Profile without changing its protocol name. Persistent installed, user-local, and project config must not contain secret values or enable unattended invocation. `model` and `reasoning_effort` are translated into provider-specific argv; conflicting duplicate argv declarations are rejected. Participant Profile instructions are copied into finalized prompts and remain subordinate to CAC Policy, ReviewScope, and phase output requirements. Child CLIs receive only environment-variable names declared by the Execution Profile, while values remain unrecorded. Execution Profile argv is a preset for explicit invocation only; `invocation-ready` must still pass and the prompt/raw-output paths must be recorded before any external reviewer CLI is run. `consensus init` records the resolved identity/profile mapping and effective commands in `ConfigResolution` before any config-derived value is used. Version 0.13.0 rejects `cross-agent-consensus-config-1` and `reviewer_clis`; migrate them to schema 2 before loading the configuration.
 
+Every supervised provider launch must create `execution_attempt_started` in the
+RunJournal before `subprocess.Popen()`. A successful provider exit remains an
+ambiguous attempt until capture writes and hashes the expected protocol
+receipt. Never retry an unresolved `mutating` or `external_side_effect`
+attempt without an explicit operator decision recorded through
+`--approve-ambiguous-retry --operator-identity <identity>`.
+
 ## Terse Invocation Behavior
 
 For terse `cac: <task_description>` invocations, treat `<task_description>` as the TaskBrief objective. If the task asks to design, implement, write, fix, analyze, migrate, or otherwise produce work, the first phase is Author execution and the second phase is Reviewer/Validator validation. If the task only asks to review an existing artifact, skip Author execution and start from the review batch after initialization.

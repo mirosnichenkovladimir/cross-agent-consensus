@@ -24,6 +24,12 @@ from .readiness import runtime_command
 from .telemetry import agent_event
 
 
+class ProviderOutputError(ValueError):
+    def __init__(self, failure_mode: str) -> None:
+        self.failure_mode = failure_mode
+        super().__init__(failure_mode.replace("_", " "))
+
+
 class GenericCliPlayer:
     def __init__(self, player_id: str = "generic-cli") -> None:
         self.player_id = player_id
@@ -55,7 +61,9 @@ class GenericCliPlayer:
             },
         )
 
-    def extract_final_output(self, paths: AgentSessionPaths) -> Path:
+    def extract_final_output(
+        self, paths: AgentSessionPaths, *, require_structured: bool = False
+    ) -> Path:
         shutil.copyfile(paths.stdout, paths.final_output)
         return paths.final_output
 
@@ -181,14 +189,54 @@ class StructuredJsonCliPlayer(GenericCliPlayer):
         lowered = text.lower()
         return any(token in lowered for token in ["permission", "approval", "press enter", "continue?", "login"])
 
-    def extract_final_output(self, paths: AgentSessionPaths) -> Path:
-        text = self.extract_text_from_jsonl(paths.stdout)
-        if text is None:
+    def extract_final_output(
+        self, paths: AgentSessionPaths, *, require_structured: bool = False
+    ) -> Path:
+        text = self.extract_text_from_jsonl(
+            paths.stdout,
+            allow_delta=not require_structured,
+        )
+        if text is None or (require_structured and not self.stream_has_terminal_event(paths.stdout)):
+            if require_structured:
+                raise ProviderOutputError(self.structured_output_failure(paths.stdout))
             return super().extract_final_output(paths)
         atomic_write_text(paths.final_output, text.rstrip() + "\n")
         return paths.final_output
 
-    def extract_text_from_jsonl(self, path: Path) -> str | None:
+    def structured_output_failure(self, path: Path) -> str:
+        saw_json_object = False
+        saw_malformed_line = False
+        if path.is_file():
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    saw_malformed_line = True
+                    continue
+                if isinstance(value, dict):
+                    saw_json_object = True
+        if saw_malformed_line and not saw_json_object:
+            return "malformed_stream"
+        return "missing_final_output"
+
+    def stream_has_terminal_event(self, path: Path) -> bool:
+        if not path.is_file():
+            return False
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            native_type = self.native_event_type(payload)
+            if self.normalized_event_type(payload, native_type) == "final":
+                return True
+        return False
+
+    def extract_text_from_jsonl(self, path: Path, *, allow_delta: bool = True) -> str | None:
         if not path.is_file():
             return None
         parts: list[str] = []
@@ -209,7 +257,7 @@ class StructuredJsonCliPlayer(GenericCliPlayer):
                 parts.append(delta)
         if final_candidates:
             return final_candidates[-1]
-        if parts:
+        if allow_delta and parts:
             return "".join(parts)
         return None
 

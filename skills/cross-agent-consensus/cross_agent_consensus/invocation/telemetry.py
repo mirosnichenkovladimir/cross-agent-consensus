@@ -186,6 +186,8 @@ def write_invocation_json(paths: AgentSessionPaths, invocation: AgentInvocation)
             "player_id": invocation.player_id,
             "effective_command": invocation.command,
             "session_id": invocation.session_id,
+            "execution_attempt_id_or_null": invocation.execution_attempt_id,
+            "retry_safety": invocation.retry_safety,
             "prompt_source_path": path_for_json(invocation.prompt_path, invocation.run),
             "prompt_sha256": prompt_sha,
             "raw_output_path": path_for_json(invocation.raw_output_path, invocation.run),

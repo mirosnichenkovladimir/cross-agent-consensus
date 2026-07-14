@@ -273,6 +273,32 @@ class NextActionPlanTests(unittest.TestCase):
         self.assertEqual(plan.runnable_actions, ("invoke-codex-reviewer",))
         self.assertEqual(plan.pending_checkpoints, ())
 
+    def test_ambiguous_mutating_attempt_is_classified_and_withheld(self) -> None:
+        records = initialized_records()
+        records[1].data["unattended_invocation"] = True
+        records.extend([
+            protocol_record("ArtifactVersion", "v1", artifact_version_id="v1"),
+            protocol_record(
+                "ReviewBatch", "batch-001", review_batch_id="batch-001", round_id="round-1",
+                expected_reviewer_identities=["codex"],
+            ),
+        ])
+        start_details = {
+            "attempt_id": "attempt-codex-001", "action_id": "invoke-codex-reviewer",
+            "attempt_number": 1, "predecessor_attempt_id_or_null": None,
+            "participant_identity": "codex", "session_id": "session-001",
+            "retry_safety": "mutating",
+        }
+        events = [{"event_type": "execution_attempt_started", "details": start_details}]
+
+        plan = build_next_action_plan("run-001", records, events)
+
+        self.assertEqual(plan.runnable_actions, ())
+        self.assertTrue(any("attempt-codex-001 is ambiguous" in item for item in plan.blockers))
+        self.assertIn(
+            "OperatorApproval:ambiguous-retry:attempt-codex-001", plan.required_records
+        )
+
     def test_non_reviewer_phases_do_not_advertise_incomplete_invoke_macros(self) -> None:
         def bind_execution(records: list[Record], identity: str, role: str) -> None:
             resolution = next(record for record in records if record.record_type == "ConfigResolution")

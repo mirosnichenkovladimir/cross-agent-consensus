@@ -132,3 +132,32 @@ The three configuration mappings have separate meanings:
 - `participant_identities`: one Participant Profile and one Execution Profile selected for each stable Participant Identity.
 
 Execution Profile argv is an explicit command preset. It does not bypass `invocation-ready`, does not authorize launch, and does not permit dynamic provider substitution. Version 0.13.0 rejects schema `cross-agent-consensus-config-1` and `reviewer_clis`; use `cross-agent-consensus-config-2`, `execution_profiles`, and `participant_identities`.
+
+## Execution attempts
+
+`invoke-agent` appends `execution_attempt_started` to `events.jsonl` before it
+calls `subprocess.Popen()`. The event binds the action ID, participant and
+execution identities, input protocol-record and ArtifactVersion hashes,
+expected protocol receipt, provider session, predecessor attempt, and one of
+four retry-safety classes: `read_only`, `idempotent`, `mutating`, or
+`external_side_effect`.
+
+A zero exit code proves only that the provider process stopped successfully.
+CAC records `execution_attempt_ambiguous` with `failure_mode: missing_receipt`
+until `consensus capture` writes `RawReviewerOutput` or `ValidationEvidence`.
+Capture then appends `execution_attempt_completed` with the receipt record ID
+and hash. Launch failure, nonzero exit, timeout, process termination, malformed
+receipt, and receipt-integrity failure remain distinct failure modes.
+
+An `execution_attempt_started` event without a later observation means the
+supervisor stopped before it could observe the provider or receipt. CAC treats
+that unmatched attempt as ambiguous. `read_only` attempts may be repeated;
+repeating `mutating` or `external_side_effect` attempts requires the operator
+to inspect external state and pass `--approve-ambiguous-retry` together with
+`--operator-identity`. Nonzero exit, timeout, cancellation, and post-launch
+termination remain ambiguous for these two safety classes because the provider
+may have changed the worktree or external service before it stopped.
+
+`consensus new-artifact --execution-attempt <attempt-id>` is the Author receipt
+path. It verifies that `--produced-by` names the same ParticipantIdentity and
+then binds the new `ArtifactVersion` record hash to that attempt.

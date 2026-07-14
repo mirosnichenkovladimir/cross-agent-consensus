@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.14.0] - 2026-07-14
+
+### Added
+- Every supervised provider launch appends `execution_attempt_started` to the
+  hash-chained RunJournal before `subprocess.Popen()`. The record binds the
+  action, ParticipantIdentity, ParticipantProfile, ExecutionProfile, prompt,
+  protocol-record digest, ArtifactVersion digest, expected receipt, attempt
+  number, predecessor attempt, provider session, and retry-safety class.
+- Provider completion appends an explicit attempt observation: completed,
+  failed, or ambiguous. A zero provider exit remains ambiguous until capture
+  writes `RawReviewerOutput` or `ValidationEvidence` and binds its record hash.
+- The fake-provider conformance fixture covers stdin/argv, structured events,
+  stderr, nonzero exit, stalled and child processes, resume-shaped output,
+  malformed streams, missing final output/session ID, and digest mismatch.
+
+### Changed
+- A stale provider process receives `SIGTERM` for its whole process group and,
+  after the cancellation grace period, `SIGKILL`. The attempt records `timeout`
+  separately from nonzero exit, process termination, and launch failure.
+- `invoke-agent --retry-safety` classifies launches as `read_only`,
+  `idempotent`, `mutating`, or `external_side_effect`. Retrying an unresolved
+  mutating or external-side-effect attempt requires the recorded operator
+  decision `--approve-ambiguous-retry --operator-identity <identity>`.
+- `new-artifact --execution-attempt <attempt-id>` binds an Author-produced
+  `ArtifactVersion` receipt to its exact mutating attempt.
+- `invocation.json` now binds the RunJournal attempt ID and retry-safety class.
+
+### Fixed
+- A supervisor crash after provider launch no longer erases the launch intent:
+  an unmatched `execution_attempt_started` record remains durable and blocks
+  unsafe automatic repetition.
+- Receipt capture correlates by globally unique execution-attempt ID rather
+  than participant-local `session-NNN`, and the RunJournal rejects completion
+  after a failed attempt.
+- Structured providers must emit a final answer; malformed streams and
+  final-answer omissions produce distinct failed attempt observations.
+- Timeout and operator cancellation continue targeting the stored process
+  group after its leader exits, so orphaned provider children cannot hold the
+  supervisor open past the cancellation grace period.
+
 ## [0.13.0] - 2026-07-14
 
 ### Added

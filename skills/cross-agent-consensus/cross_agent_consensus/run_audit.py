@@ -404,6 +404,104 @@ def read_run_events(run: Path) -> list[dict[str, Any]]:
     return events
 
 
+def execution_attempt_event_messages(events: list[dict[str, Any]]) -> list[str]:
+    """Validate execution-attempt identity, transitions, and unsafe retries."""
+
+    messages: list[str] = []
+    attempts: dict[str, dict[str, Any]] = {}
+    latest_by_action: dict[str, str] = {}
+    for event in events:
+        event_type = event.get("event_type")
+        if event_type not in {
+            "execution_attempt_started",
+            "execution_attempt_ambiguous",
+            "execution_attempt_failed",
+            "execution_attempt_completed",
+        }:
+            continue
+        sequence = event.get("sequence")
+        details = event.get("details")
+        if not isinstance(details, dict):
+            messages.append(f"events.jsonl:{sequence}: execution-attempt details must be an object")
+            continue
+        attempt_id = details.get("attempt_id")
+        action_id = details.get("action_id")
+        if not isinstance(attempt_id, str) or not attempt_id:
+            messages.append(f"events.jsonl:{sequence}: execution-attempt attempt_id is required")
+            continue
+        if event_type == "execution_attempt_started":
+            if attempt_id in attempts:
+                messages.append(f"events.jsonl:{sequence}: duplicate execution attempt {attempt_id}")
+                continue
+            if not isinstance(action_id, str) or not action_id:
+                messages.append(f"events.jsonl:{sequence}: execution-attempt action_id is required")
+                continue
+            predecessor_id = latest_by_action.get(action_id)
+            recorded_predecessor = details.get("predecessor_attempt_id_or_null")
+            if recorded_predecessor != predecessor_id:
+                messages.append(
+                    f"events.jsonl:{sequence}: predecessor attempt must be {predecessor_id!r}"
+                )
+            if predecessor_id is not None:
+                predecessor = attempts[predecessor_id]
+                predecessor_state = predecessor["state"]
+                predecessor_failure = predecessor.get("failure_mode")
+                retry_safety = predecessor["details"].get("retry_safety")
+                unsafe_retry = (
+                    retry_safety in {"mutating", "external_side_effect"}
+                    and predecessor_state != "completed"
+                    and not (
+                        predecessor_state == "failed"
+                        and predecessor_failure == "launch_failure"
+                    )
+                )
+                if unsafe_retry and (
+                    details.get("ambiguous_retry_operator_approved") is not True
+                    or not details.get("ambiguous_retry_operator_identity_or_null")
+                ):
+                    messages.append(
+                        f"events.jsonl:{sequence}: unsafe retry of {predecessor_id} lacks operator identity"
+                    )
+            attempts[attempt_id] = {
+                "details": details,
+                "state": "started",
+                "failure_mode": None,
+            }
+            latest_by_action[action_id] = attempt_id
+            continue
+        attempt = attempts.get(attempt_id)
+        if attempt is None:
+            messages.append(f"events.jsonl:{sequence}: observation references unknown attempt {attempt_id}")
+            continue
+        start_details = attempt["details"]
+        if action_id != start_details.get("action_id"):
+            messages.append(f"events.jsonl:{sequence}: action_id differs for attempt {attempt_id}")
+        if details.get("session_id") != start_details.get("session_id"):
+            messages.append(f"events.jsonl:{sequence}: session_id differs for attempt {attempt_id}")
+        previous_state = attempt["state"]
+        allowed_previous = {
+            "execution_attempt_ambiguous": {"started"},
+            "execution_attempt_failed": {"started", "ambiguous"},
+            "execution_attempt_completed": {"ambiguous"},
+        }[str(event_type)]
+        if previous_state not in allowed_previous:
+            messages.append(
+                f"events.jsonl:{sequence}: invalid attempt transition {previous_state} -> {event_type}"
+            )
+            continue
+        if event_type == "execution_attempt_ambiguous" and details.get("failure_mode") != "missing_receipt":
+            messages.append(
+                f"events.jsonl:{sequence}: ambiguous attempt must use failure_mode missing_receipt"
+            )
+        if event_type == "execution_attempt_completed" and (
+            details.get("receipt_record_type") != start_details.get("expected_receipt_type")
+        ):
+            messages.append(f"events.jsonl:{sequence}: receipt type differs for attempt {attempt_id}")
+        attempt["state"] = str(event_type).removeprefix("execution_attempt_")
+        attempt["failure_mode"] = details.get("failure_mode")
+    return messages
+
+
 def run_event_messages(run: Path) -> list[str]:
     """Return malformed sequence and transition diagnostics."""
 
@@ -502,4 +600,5 @@ def run_event_messages(run: Path) -> list[str]:
             "events.jsonl: final phase_after does not match protocol records: "
             f"{recorded_phase!r} != {final_phase!r}"
         )
+    messages.extend(execution_attempt_event_messages(valid_events))
     return messages

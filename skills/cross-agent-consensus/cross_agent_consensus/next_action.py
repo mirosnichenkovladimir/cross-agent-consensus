@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from cross_agent_consensus.config import legacy_adapter_for_command
+from cross_agent_consensus.execution_attempts import latest_attempt_statuses
 from cross_agent_consensus.io import slugify
 from cross_agent_consensus.invocation.readiness import policy_allows_unattended_scoped
 from cross_agent_consensus.lifecycle import (
@@ -761,6 +762,24 @@ def build_next_action_plan(
             continue
         blockers.append(f"OperatorApproval is missing for checkpoint {checkpoint.checkpoint_id}")
         required.append(f"OperatorApproval:{checkpoint.checkpoint_id}")
+    for attempt in latest_attempt_statuses(events):
+        action_id = str(attempt["action_id"])
+        if action_id not in actions or attempt["event_type"] == "execution_attempt_completed":
+            continue
+        attempt_id = str(attempt["attempt_id"])
+        failure_mode = attempt["failure_mode_or_null"] or "observation_missing"
+        if attempt["requires_operator_decision"]:
+            actions = [action for action in actions if action != action_id]
+            blockers.append(
+                f"execution attempt {attempt_id} is ambiguous after {failure_mode}; "
+                f"operator decision is required before {action_id}"
+            )
+            required.append(f"OperatorApproval:ambiguous-retry:{attempt_id}")
+        else:
+            blockers.append(
+                f"execution attempt {attempt_id} ended as {attempt['event_type']} "
+                f"after {failure_mode}; {attempt['retry_safety']} retry is allowed"
+            )
     return NextActionPlan(
         schema_version=NEXT_ACTION_PLAN_SCHEMA,
         run_id=run_id,

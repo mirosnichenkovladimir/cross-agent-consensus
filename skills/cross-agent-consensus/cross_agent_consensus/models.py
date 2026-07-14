@@ -175,6 +175,8 @@ class AgentInvocation:
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
     session_id: str
+    execution_attempt_id: str | None = None
+    retry_safety: str = "read_only"
     prompt_transport: str = "stdin"
     output_mode: str = "raw_stdout"
     env_allowlist: list[str] = field(default_factory=list)
@@ -250,6 +252,9 @@ class InvocationCommandInput(InvocationReadyInput):
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
     require_existing_approval: bool = False
+    retry_safety: str | None = None
+    approve_ambiguous_retry: bool = False
+    operator_identity: str | None = None
 
 
 @dataclass

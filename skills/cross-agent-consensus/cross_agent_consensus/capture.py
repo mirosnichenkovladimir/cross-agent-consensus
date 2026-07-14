@@ -16,6 +16,12 @@ from cross_agent_consensus.io import (
     utc_now,
     write_bytes_new,
 )
+from cross_agent_consensus.execution_attempts import (
+    assert_attempt_accepts_receipt_locked,
+    complete_attempt_for_receipt_locked,
+    fail_attempt_for_receipt_locked,
+    receipt_attempt_source,
+)
 from cross_agent_consensus.layout import (
     DEFAULT_LAYOUT,
     detect_run_layout,
@@ -440,7 +446,14 @@ def _resolve_single_candidate(flag: str, candidates: list[str], *, hint: str) ->
 @locked_run_command("evidence_captured")
 def cmd_capture(args: CaptureCommandInput) -> int:
     run = Path(args.run)
+    source_attempt = None
     try:
+        source_attempt = receipt_attempt_source(
+            run,
+            args.source_file,
+            participant_identity=args.actor,
+            round_id=args.round,
+        )
         if args.phase in {"author", "manual"} and not args.no_append_record:
             raise ValueError(f"{args.phase} capture requires --no-append-record for bare payload capture")
         records = parse_run_records(run)
@@ -469,15 +482,43 @@ def cmd_capture(args: CaptureCommandInput) -> int:
                 raise ValueError(
                     f"reviewer output already captured for {reviewer_identity} in ReviewBatch {args.review_batch}"
                 )
+        if source_attempt is not None and not args.no_append_record:
+            expected_type = (
+                "RawReviewerOutput" if args.phase == "reviewer" else "ValidationEvidence"
+            )
+            assert_attempt_accepts_receipt_locked(run, source_attempt, expected_type)
         raw_path, raw_sha = copy_raw_payload(run, args, records)
         if not args.no_append_record:
             if args.phase == "reviewer":
                 append_reviewer_capture(run, args, raw_path, raw_sha, records=records)
             elif args.phase == "validator":
                 append_validator_capture(run, args, raw_path, raw_sha)
+            if source_attempt is not None:
+                expected_type = "RawReviewerOutput" if args.phase == "reviewer" else "ValidationEvidence"
+                before_keys = {(record.record_type, record.record_id) for record in records}
+                receipt = next(
+                    (
+                        record
+                        for record in reversed(parse_run_records(run))
+                        if record.record_type == expected_type
+                        and (record.record_type, record.record_id) not in before_keys
+                    ),
+                    None,
+                )
+                if receipt is None:
+                    raise ValueError(f"{expected_type} receipt was not written")
+                complete_attempt_for_receipt_locked(run, source_attempt, receipt)
         print(f"captured raw payload: {raw_path}")
         print(f"sha256: {raw_sha}")
         return 0
     except Exception as exc:
+        if source_attempt is not None:
+            lowered = str(exc).lower()
+            failure_mode = (
+                "receipt_integrity_failure"
+                if any(token in lowered for token in ("sha256", "digest", "drift", "match"))
+                else "malformed_receipt"
+            )
+            fail_attempt_for_receipt_locked(run, source_attempt, failure_mode, str(exc))
         eprint(f"error: {exc}")
         return 1

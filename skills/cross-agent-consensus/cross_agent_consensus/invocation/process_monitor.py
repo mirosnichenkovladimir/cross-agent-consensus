@@ -23,6 +23,11 @@ from cross_agent_consensus.io import (
     write_bytes_new,
 )
 from cross_agent_consensus.approval import ensure_invocation_approval, verify_invocation_approval
+from cross_agent_consensus.execution_attempts import (
+    append_attempt_observation,
+    resolved_retry_safety,
+    start_execution_attempt,
+)
 from cross_agent_consensus.models import (
     AgentInvocation,
     AgentSessionPaths,
@@ -33,7 +38,7 @@ from cross_agent_consensus.models import (
 from cross_agent_consensus.profiles import bind_recorded_invocation_profile
 from cross_agent_consensus.records import parse_run_records
 
-from .adapters import GenericCliPlayer, ManualPlayer, get_player_adapter
+from .adapters import GenericCliPlayer, ManualPlayer, ProviderOutputError, StructuredJsonCliPlayer, get_player_adapter
 from .readiness import (
     codex_trusted_dir_errors,
     command_for_display,
@@ -139,6 +144,16 @@ def process_exists(pid: int) -> bool:
         return False
 
 
+def process_group_exists(process_group_id: int) -> bool:
+    try:
+        os.killpg(process_group_id, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def classify_live_agent_state(last_activity_monotonic: float, invocation: AgentInvocation) -> str:
     idle_for = time.monotonic() - last_activity_monotonic
     if idle_for >= invocation.stale_timeout_seconds:
@@ -170,6 +185,7 @@ def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPath
         stale_timeout_seconds=args.stale_timeout_seconds,
         heartbeat_interval_seconds=args.heartbeat_interval_seconds,
         session_id=paths.session.name,
+        retry_safety=resolved_retry_safety(args.phase, args.retry_safety),
         prompt_transport=getattr(args, "prompt_transport", "stdin"),
         output_mode=getattr(args, "output_mode", "raw_stdout"),
         env_allowlist=list(getattr(args, "env_allowlist", [])),
@@ -247,6 +263,9 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
         raise TypeError(f"player {invocation.player_id} cannot run as a monitored CLI")
     stream_buffers = {"stdout": "", "stderr": ""}
     agent_log_buffers = {"stdout": "", "stderr": ""}
+    timeout_requested_at: float | None = None
+    timeout_termination_sent = False
+    timeout_force_kill_sent = False
     try:
         started_monotonic = time.monotonic()
         started_at = utc_now()
@@ -353,8 +372,40 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                         process_identity_or_null=process_identity,
                     )
                     next_heartbeat = now + max(0.05, invocation.heartbeat_interval_seconds)
+                    if new_state == "stale" and timeout_requested_at is None:
+                        timeout_requested_at = now
+                        append_agent_event(paths, invocation, "timeout_requested")
+                if (
+                    timeout_requested_at is not None
+                    and not timeout_termination_sent
+                    and now - timeout_requested_at >= 0.5
+                ):
+                    timeout_termination_sent = True
+                    append_agent_event(paths, invocation, "timeout_terminate")
+                    try:
+                        os.killpg(process_group_id, signal.SIGTERM)
+                    except OSError:
+                        pass
+                if (
+                    timeout_requested_at is not None
+                    and not timeout_force_kill_sent
+                    and now - timeout_requested_at >= DEFAULT_CANCEL_GRACE_SECONDS
+                ):
+                    timeout_force_kill_sent = True
+                    append_agent_event(paths, invocation, "timeout_force_kill")
+                    try:
+                        os.killpg(process_group_id, signal.SIGKILL)
+                    except OSError:
+                        pass
                 if proc.poll() is not None and not selector.get_map():
-                    break
+                    if timeout_requested_at is None or timeout_force_kill_sent:
+                        break
+                    if timeout_termination_sent and not process_group_exists(process_group_id):
+                        break
+                    # The provider leader may exit while an orphaned child keeps
+                    # running after closing inherited stdout/stderr. Keep the
+                    # supervisor alive through the process-group grace period.
+                    continue
         if isinstance(adapter, GenericCliPlayer):
             flush_agent_log_from_stream(paths, invocation, adapter, agent_log_buffers)
             for event in adapter.flush_stream_events(stream_buffers, invocation):
@@ -370,11 +421,27 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                 invocation.raw_output_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(paths.stdout, invocation.raw_output_path)
             append_agent_event(paths, invocation, "cancelled", exit_code=return_code, signal=signal_number)
+        elif timeout_requested_at is not None:
+            final_state = "timed_out"
+            failure_reason = "provider emitted no output before stale timeout"
+            if paths.stdout.is_file():
+                invocation.raw_output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(paths.stdout, invocation.raw_output_path)
+            append_agent_event(paths, invocation, "timed_out", exit_code=return_code, signal=signal_number)
         elif return_code == 0:
             final_state = "completed"
             invocation.raw_output_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(paths.stdout, invocation.raw_output_path)
-            final_output = adapter.extract_final_output(paths)
+            final_output = adapter.extract_final_output(
+                paths,
+                require_structured=(
+                    isinstance(adapter, StructuredJsonCliPlayer)
+                    and (
+                        invocation.output_mode == "stream_json"
+                        or adapter.command_requests_json(command_spec.argv)
+                    )
+                ),
+            )
             final_output_path = session_relative(final_output, paths.session)
             # Mirror the extracted final-output beside --raw-output so the path the
             # orchestrator pre-declared also leads to the parsed result, not only
@@ -418,6 +485,28 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                 else None
             ),
         )
+        if final_state == "completed":
+            append_attempt_observation(
+                invocation,
+                "execution_attempt_ambiguous",
+                failure_mode="missing_receipt",
+                exit_code=return_code,
+            )
+        else:
+            failure_mode = (
+                "timeout"
+                if final_state == "timed_out"
+                else "process_termination"
+                if final_state == "cancelled" or signal_number is not None
+                else "nonzero_exit"
+            )
+            append_attempt_observation(
+                invocation,
+                "execution_attempt_failed",
+                failure_mode=failure_mode,
+                exit_code=return_code if return_code >= 0 else None,
+                signal_number=signal_number,
+            )
         return 0 if final_state == "completed" else 4
     except Exception as exc:
         reason = str(exc)
@@ -427,6 +516,17 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
             except OSError:
                 pass
         record_failed_agent_session(paths, invocation, reason, started_at=started_at, started_monotonic=started_monotonic)
+        append_attempt_observation(
+            invocation,
+            "execution_attempt_failed",
+            failure_mode=(
+                exc.failure_mode
+                if isinstance(exc, ProviderOutputError)
+                else "launch_failure"
+                if proc is None
+                else "process_termination"
+            ),
+        )
         return 1
 
 
@@ -578,6 +678,13 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             record_failed_agent_session(paths, invocation, reason)
             eprint(f"error: {reason}")
             return 3
+        invocation.execution_attempt_id = start_execution_attempt(
+            invocation,
+            retry_safety=invocation.retry_safety,
+            approve_ambiguous_retry=bool(getattr(args, "approve_ambiguous_retry", False)),
+            ambiguous_retry_operator_identity=getattr(args, "operator_identity", None),
+        )
+        write_invocation_json(paths, invocation)
         return run_generic_agent(invocation, paths, command_spec)
     except Exception as exc:
         eprint(f"error: {exc}")
@@ -614,6 +721,12 @@ def cmd_agent_cancel(args: argparse.Namespace) -> int:
             stale_timeout_seconds=DEFAULT_STALE_TIMEOUT_SECONDS,
             heartbeat_interval_seconds=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
             session_id=paths.session.name,
+            execution_attempt_id=(
+                str(invocation_data.get("execution_attempt_id_or_null"))
+                if invocation_data.get("execution_attempt_id_or_null")
+                else None
+            ),
+            retry_safety=str(invocation_data.get("retry_safety") or "read_only"),
         )
         state = read_json_file(paths.state)
         if state.get("state") in {"completed", "failed", "cancelled"} or paths.exit.is_file():
@@ -646,40 +759,15 @@ def cmd_agent_cancel(args: argparse.Namespace) -> int:
             except PermissionError:
                 os.kill(pid_int, signal.SIGTERM)
             time.sleep(max(0.0, args.grace_seconds))
-            current_pgid_after_term: int | None
             try:
-                current_pgid_after_term = os.getpgid(pid_int)
+                os.killpg(pgid_int, 0)
             except ProcessLookupError:
-                current_pgid_after_term = None
-            if current_pgid_after_term is not None:
-                if current_pgid_after_term != pgid_int:
-                    append_agent_event(
-                        paths,
-                        invocation,
-                        "failed",
-                        failure_reason="pid_unverifiable",
-                        reason="process group mismatch before SIGKILL",
-                    )
-                    eprint("error: pid_unverifiable")
-                    return 3
-                if not process_identity_matches(pid_int, expected_identity):
-                    if process_exists(pid_int):
-                        append_agent_event(
-                            paths,
-                            invocation,
-                            "failed",
-                            failure_reason="pid_unverifiable",
-                            reason="process identity mismatch before SIGKILL",
-                        )
-                        eprint("error: pid_unverifiable")
-                        return 3
-                else:
-                    try:
-                        os.killpg(pgid_int, signal.SIGKILL)
-                    except PermissionError:
-                        os.kill(pid_int, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                pass
+            else:
+                try:
+                    os.killpg(pgid_int, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             append_agent_event(paths, invocation, "cancelled", reason=args.reason)
             print(f"cancel requested: {paths.session}")
             return 0

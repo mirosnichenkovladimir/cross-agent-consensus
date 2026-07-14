@@ -27,6 +27,11 @@ from cross_agent_consensus.io import (
     utc_now,
 )
 from cross_agent_consensus.integrity import content_locator_base
+from cross_agent_consensus.execution_attempts import (
+    assert_attempt_accepts_receipt_locked,
+    complete_attempt_for_receipt_locked,
+    receipt_attempt_source_by_id,
+)
 from cross_agent_consensus.init import build_init_files
 from cross_agent_consensus.lifecycle import artifact_chain
 from cross_agent_consensus.normalize import cmd_normalize
@@ -629,6 +634,13 @@ def cmd_config_setup(args: argparse.Namespace) -> int:
 def cmd_new_artifact(args: argparse.Namespace) -> int:
     run = Path(args.run)
     try:
+        attempt_source = None
+        execution_attempt = getattr(args, "execution_attempt", None)
+        if execution_attempt:
+            attempt_source = receipt_attempt_source_by_id(run, execution_attempt)
+            assert_attempt_accepts_receipt_locked(run, attempt_source, "ArtifactVersion")
+            if args.produced_by != attempt_source.participant_identity:
+                raise ValueError("--produced-by must match the execution-attempt ParticipantIdentity")
         artifact_id = args.artifact_version
         safe_relative_path(f"{artifact_id}.md", "artifact_version")
         path = run / "artifacts" / f"{artifact_id}.md"
@@ -667,6 +679,19 @@ def cmd_new_artifact(args: argparse.Namespace) -> int:
             ]
         )
         atomic_write_new(path, body)
+        if attempt_source is not None:
+            receipt = next(
+                (
+                    record
+                    for record in parse_run_records(run)
+                    if record.record_type == "ArtifactVersion"
+                    and record.data.get("artifact_version_id") == artifact_id
+                ),
+                None,
+            )
+            if receipt is None:
+                raise ValueError(f"ArtifactVersion receipt was not written: {artifact_id}")
+            complete_attempt_for_receipt_locked(run, attempt_source, receipt)
         print(f"created artifact: {path}")
         return 0
     except Exception as exc:
@@ -1130,6 +1155,10 @@ def build_parser() -> argparse.ArgumentParser:
     artifact.add_argument("--predecessor")
     artifact.add_argument("--content-locator", required=True)
     artifact.add_argument("--produced-by", required=True)
+    artifact.add_argument(
+        "--execution-attempt",
+        help="Execution-attempt ID whose expected ArtifactVersion receipt this command writes.",
+    )
     artifact.add_argument("--actor", default="orchestrator-consensus-tool")
     artifact.set_defaults(func=cmd_new_artifact)
 
@@ -1251,6 +1280,20 @@ def build_parser() -> argparse.ArgumentParser:
     invoke.add_argument("--idle-timeout-seconds", type=float, default=DEFAULT_IDLE_TIMEOUT_SECONDS)
     invoke.add_argument("--stale-timeout-seconds", type=float, default=DEFAULT_STALE_TIMEOUT_SECONDS)
     invoke.add_argument("--heartbeat-interval-seconds", type=float, default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS)
+    invoke.add_argument(
+        "--retry-safety",
+        choices=["read_only", "idempotent", "mutating", "external_side_effect"],
+        help="Side-effect classification used to decide whether an ambiguous attempt may be retried.",
+    )
+    invoke.add_argument(
+        "--approve-ambiguous-retry",
+        action="store_true",
+        help="Record the operator decision to retry an unresolved mutating or external-side-effect attempt.",
+    )
+    invoke.add_argument(
+        "--operator-identity",
+        help="Identity recorded with --approve-ambiguous-retry.",
+    )
     invoke.add_argument("--command", nargs=argparse.REMAINDER)
     invoke.set_defaults(func=cmd_invoke_agent)
 
