@@ -4,7 +4,7 @@ Confirms that the skill is present at each detected host install path
 and that SKILL.md still carries the literal alias phrase the LLM routers
 use to resolve `cac:` triggers.
 
-Routing across Claude Code, Codex, and Hermes is LLM-based — there is no
+Routing across Claude Code, Codex, Hermes, and Kimi Code is LLM-based — there is no
 authoritative "trigger -> skill" registry to write into. This module's job is
 to surface what we CAN check (install location + manifest integrity +
 description-phrase presence) and to give the operator a deterministic
@@ -33,6 +33,7 @@ HOST_INSTALL_ROOTS: dict[str, list[Path]] = {
     "claude": [Path.home() / ".claude" / "skills" / "cross-agent-consensus"],
     "codex": [Path.home() / ".codex" / "skills" / "cross-agent-consensus"],
     "hermes": [Path.home() / ".hermes" / "skills" / "cross-agent-consensus"],
+    "kimi": [Path.home() / ".kimi-code" / "skills" / "cross-agent-consensus"],
 }
 
 PROJECT_RULE_BEGIN = "<!-- cac:begin -->"
@@ -197,7 +198,7 @@ def _print_report(reports: list[HostReport]) -> None:
 
 def _hosts_to_check(host_arg: str) -> list[str]:
     if host_arg == "auto":
-        return ["claude", "codex", "hermes"]
+        return ["claude", "codex", "hermes", "kimi"]
     return [host_arg]
 
 

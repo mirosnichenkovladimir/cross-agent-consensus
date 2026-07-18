@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.19.1] - 2026-07-18
+
+### Added
+- `install-cac --target kimi` installs CAC under
+  `$KIMI_CODE_HOME/skills/cross-agent-consensus`, defaulting to
+  `~/.kimi-code/skills/cross-agent-consensus`.
+- `consensus selftest --invocation --host kimi` checks the Kimi-hosted package,
+  its routing description, and every managed-file digest.
+
+### Changed
+- `install-cac --target all` now installs Hermes, Codex, Claude, and Kimi host
+  copies. `--allow-missing-first-class` treats a missing Kimi CLI like missing
+  Hermes or Codex.
+
 ## [0.19.0] - 2026-07-18
 
 ### Added

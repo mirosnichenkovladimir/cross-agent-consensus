@@ -98,6 +98,12 @@ class SelftestTests(unittest.TestCase):
         self.assertEqual(rc, 0, stdout)
         self.assertIn("[OK]", stdout)
 
+    def test_selftest_with_healthy_kimi_returns_0(self) -> None:
+        _stage_install(self.home, "kimi-code")
+        rc, stdout, _err = self._capture(_Args(invocation=True, host="kimi"))
+        self.assertEqual(rc, 0, stdout)
+        self.assertIn("kimi [OK]", stdout)
+
     def test_selftest_missing_alias_phrase_returns_3(self) -> None:
         _stage_install(self.home, "claude", description="Cross-agent consensus only, nothing else.")
         rc, stdout, _err = self._capture(_Args(invocation=True, host="claude"))

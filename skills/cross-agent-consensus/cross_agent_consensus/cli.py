@@ -1544,7 +1544,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     selftest.add_argument(
         "--host",
-        choices=["claude", "codex", "hermes", "auto"],
+        choices=["claude", "codex", "hermes", "kimi", "auto"],
         default="auto",
         help="Restrict checks to a single host; default checks every host detected on this machine.",
     )

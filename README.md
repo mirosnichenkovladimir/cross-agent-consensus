@@ -25,10 +25,11 @@ Install the manual `cross-agent-consensus` skill package with the terse `cac` in
 ./scripts/install-cac --target hermes
 ./scripts/install-cac --target codex
 ./scripts/install-cac --target claude
+./scripts/install-cac --target kimi
 ./scripts/install-cac --target all --update
 ```
 
-The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.19.0 adds a first-class `kimi-cli` connector: `python3 -m cross_agent_consensus.kimi_cli` reads CAC's finalized prompt from stdin, invokes Kimi headless mode, parses Kimi JSONL, captures and resumes Kimi session IDs, inherits CAC cancellation, and reports `kimi --version`. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
+The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.19.0 adds a first-class `kimi-cli` connector: `python3 -m cross_agent_consensus.kimi_cli` reads CAC's finalized prompt from stdin, invokes Kimi headless mode, parses Kimi JSONL, captures and resumes Kimi session IDs, inherits CAC cancellation, and reports `kimi --version`. Version 0.19.1 adds Kimi's user skill directory as an install and self-test target; `--target all` covers Hermes, Codex, Claude, and Kimi. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
 
 Trigger examples after install:
 
