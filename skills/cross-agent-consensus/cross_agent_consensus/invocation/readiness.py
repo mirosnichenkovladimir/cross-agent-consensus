@@ -289,6 +289,14 @@ def player_command_telemetry_errors(player_id: str, command: list[str]) -> list[
                 f"--player hermes-cli requires -m {HERMES_BRIDGE_MODULE} "
                 "for stdin prompt transport and JSONL telemetry"
             )
+    if player_id == "kimi-cli":
+        from cross_agent_consensus.invocation.adapters import KIMI_BRIDGE_MODULE
+
+        if KIMI_BRIDGE_MODULE not in command:
+            messages.append(
+                f"--player kimi-cli requires -m {KIMI_BRIDGE_MODULE} "
+                "for stable approved argv, stdin prompt transport, and JSONL telemetry"
+            )
     return messages
 
 

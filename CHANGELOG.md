@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.19.0] - 2026-07-18
+
+### Added
+- `kimi-cli` and `kimi-reviewer-default` add a first-class Kimi Code CLI
+  connector. CAC writes the recorded prompt to a stable stdin bridge; the
+  bridge supplies Kimi's required `--prompt` argument and relays
+  `stream-json` assistant, tool, and terminal records.
+- Kimi capability probing records `kimi --version`. Declarative
+  ExecutionProfile `model` maps to Kimi `--model`; the connector conformance
+  suite covers the configured `kimi-code/k3` alias.
+- `session.resume_hint` records supply Kimi provider-session identifiers.
+  Continuation uses `--session <id>` under CAC's existing ParticipantIdentity,
+  ExecutionProfile, run, and ArtifactVersion-lineage rules.
+
+### Changed
+- `run_generic_agent()` now closes provider stdin, stdout, stderr, and selector
+  resources after every completed, failed, or cancelled invocation.
+- Kimi authentication and provider configuration remain under
+  `KIMI_CODE_HOME`; Execution Profiles allowlist environment-variable names
+  without recording credential values.
+
 ## [0.18.0] - 2026-07-14
 
 ### Added

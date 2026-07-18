@@ -531,6 +531,145 @@ class CodexCliPlayer(StructuredJsonCliPlayer):
         return super().normalized_event_type(payload, native_type)
 
 
+KIMI_BRIDGE_MODULE = "cross_agent_consensus.kimi_cli"
+
+
+@lru_cache(maxsize=8)
+def detected_kimi_version(executable_path: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [executable_path, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    first_line = completed.stdout.splitlines()[0].strip() if completed.stdout else ""
+    return first_line or None
+
+
+class KimiCliPlayer(StructuredJsonCliPlayer):
+    def __init__(self) -> None:
+        super().__init__("kimi-cli")
+
+    def command_uses_bridge(self, command: list[str]) -> bool:
+        return any(
+            argument == "-m"
+            and index + 1 < len(command)
+            and command[index + 1] == KIMI_BRIDGE_MODULE
+            for index, argument in enumerate(command)
+        )
+
+    def command_requests_json(self, command: list[str]) -> bool:
+        if self.command_uses_bridge(command):
+            return True
+        for index, argument in enumerate(command):
+            if (
+                argument == "--output-format"
+                and index + 1 < len(command)
+                and command[index + 1] == "stream-json"
+            ):
+                return True
+            if argument == "--output-format=stream-json":
+                return True
+        return False
+
+    def profile_command_errors(self, command: list[str]) -> list[str]:
+        if self.command_uses_bridge(command):
+            return []
+        return [
+            "kimi-cli requires `python3 -m "
+            f"{KIMI_BRIDGE_MODULE}` so CAC can keep the approved argv stable, "
+            "pass the prompt on stdin, and capture JSONL"
+        ]
+
+    def probe(self, command: list[str]) -> PlayerCapabilities:
+        executable_path = shutil.which("kimi")
+        return PlayerCapabilities(
+            player_id=self.player_id,
+            executable=executable_path is not None,
+            supports_json_events=True,
+            supports_resume=True,
+            supports_cancel=True,
+            prompt_transports=["stdin"],
+            output_modes=["stream_json"],
+            executable_path_or_null=executable_path,
+            resume_conformance_suite_or_null=PROVIDER_RESUME_CONFORMANCE_SUITE,
+            provider_version_or_null=(
+                detected_kimi_version(executable_path) if executable_path else None
+            ),
+        )
+
+    def extract_provider_session_id(self, paths: AgentSessionPaths) -> str | None:
+        if not paths.stdout.is_file():
+            return None
+        session_ids: set[str] = set()
+        for line in paths.stdout.read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("type") != "session.resume_hint":
+                continue
+            session_id = payload.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                session_ids.add(session_id)
+        if len(session_ids) == 1:
+            return next(iter(session_ids))
+        return None
+
+    def has_native_resume_selector(self, command: list[str]) -> bool:
+        return any(
+            argument == "--session" or argument.startswith("--session=")
+            for argument in command
+        )
+
+    def build_resume_command(self, command: list[str], provider_session_id: str) -> list[str]:
+        if self.has_native_resume_selector(command):
+            raise ValueError("Kimi command already contains a resume selector")
+        return [*command, "--session", provider_session_id]
+
+    def native_event_type(self, payload: dict[str, Any]) -> str:
+        native_type = super().native_event_type(payload)
+        if native_type != "unknown":
+            return native_type
+        role = payload.get("role")
+        if role == "assistant" and payload.get("tool_calls"):
+            return "assistant.tool_calls"
+        if role == "assistant":
+            return "assistant.message"
+        if role == "tool":
+            return "tool.result"
+        return "unknown"
+
+    def normalized_event_type(self, payload: dict[str, Any], native_type: str) -> str:
+        if native_type == "session.resume_hint":
+            return "final"
+        if native_type == "assistant.tool_calls":
+            return "tool_call"
+        if native_type == "assistant.message":
+            return "message"
+        if native_type == "tool.result":
+            return "tool_result"
+        return super().normalized_event_type(payload, native_type)
+
+    def extract_final_text(self, payload: dict[str, Any]) -> str | None:
+        if payload.get("role") == "assistant":
+            content = payload.get("content")
+            if isinstance(content, str) and content:
+                return content
+        return super().extract_final_text(payload)
+
+
 HERMES_BRIDGE_MODULE = "cross_agent_consensus.hermes_cli"
 
 
@@ -656,6 +795,7 @@ PLAYER_ALIASES: dict[str, str] = {
     "deepseek": "deepseek-cli",
     "generic": "generic-cli",
     "hermes": "hermes-cli",
+    "kimi": "kimi-cli",
 }
 
 _PLAYER_FACTORIES: dict[str, Any] = {
@@ -664,6 +804,7 @@ _PLAYER_FACTORIES: dict[str, Any] = {
     "codex-cli": CodexCliPlayer,
     "generic-cli": lambda: GenericCliPlayer("generic-cli"),
     "hermes-cli": HermesCliPlayer,
+    "kimi-cli": KimiCliPlayer,
     "deepseek-cli": lambda: GenericCliPlayer("deepseek-cli"),
 }
 

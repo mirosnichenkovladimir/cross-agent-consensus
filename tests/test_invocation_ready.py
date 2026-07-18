@@ -43,6 +43,19 @@ class InvocationReadyTests(unittest.TestCase):
             " ".join(player_command_telemetry_errors("claude-cli", ["claude", "-p", "--output-format=stream-json"])),
         )
 
+    def test_kimi_requires_cac_stdin_bridge(self) -> None:
+        self.assertEqual(
+            player_command_telemetry_errors(
+                "kimi-cli",
+                ["python3", "-m", "cross_agent_consensus.kimi_cli"],
+            ),
+            [],
+        )
+        self.assertIn(
+            "--player kimi-cli requires -m cross_agent_consensus.kimi_cli",
+            " ".join(player_command_telemetry_errors("kimi-cli", ["kimi"])),
+        )
+
 
 class CodexTrustedDirTests(unittest.TestCase):
     def test_missing_skip_flag_for_real_codex_binary_returns_actionable_error(self) -> None:

@@ -557,6 +557,26 @@ def setup_config_payload() -> dict[str, Any]:
             "participant_profile_id": "reviewer-default",
             "execution_profile_id": "hermes-reviewer-default",
         }
+    if shutil.which("kimi"):
+        reviewers.append("kimi-independent-reviewer")
+        execution_profiles["kimi-reviewer-default"] = {
+            "adapter": "kimi-cli",
+            "command": ["python3", "-m", "cross_agent_consensus.kimi_cli"],
+            "prompt_transport": "stdin",
+            "output_mode": "stream_json",
+            "supports_resume": True,
+            "env": [
+                "HOME", "PATH", "PYTHONPATH", "TMPDIR", "LANG", "LC_ALL",
+                "KIMI_CODE_HOME",
+                "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_API_KEY",
+                "KIMI_MODEL_BASE_URL", "KIMI_DISABLE_TELEMETRY",
+                "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+            ],
+        }
+        participant_identities["kimi-independent-reviewer"] = {
+            "participant_profile_id": "reviewer-default",
+            "execution_profile_id": "kimi-reviewer-default",
+        }
     data: dict[str, Any] = {
         "schema_version": CONFIG_SCHEMA_VERSION,
         "defaults": {

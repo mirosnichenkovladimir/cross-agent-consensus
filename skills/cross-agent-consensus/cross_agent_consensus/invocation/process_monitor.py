@@ -343,6 +343,7 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
     started_monotonic: float | None = None
     started_at: str | None = None
     proc: subprocess.Popen[bytes] | None = None
+    selector: selectors.BaseSelector | None = None
     adapter = get_player_adapter(invocation.player_id)
     if not isinstance(adapter, GenericCliPlayer):
         raise TypeError(f"player {invocation.player_id} cannot run as a monitored CLI")
@@ -636,6 +637,13 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
             ),
         )
         return 1
+    finally:
+        if selector is not None:
+            selector.close()
+        if proc is not None:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
 
 
 def exact_invocation_approval(

@@ -176,6 +176,39 @@ class ConfigTests(unittest.TestCase):
             execution_profiles["codex-reviewer-default"].command,
             ["codex", "exec", "--skip-git-repo-check", "--json", "-"],
         )
+        self.assertEqual(identities["kimi"].participant_profile_id, "reviewer-default")
+        self.assertEqual(
+            identities["kimi"].execution_profile_id, "kimi-reviewer-default"
+        )
+        self.assertEqual(
+            execution_profiles["kimi-reviewer-default"].adapter_id, "kimi-cli"
+        )
+        self.assertEqual(
+            execution_profiles["kimi-reviewer-default"].command,
+            ["python3", "-m", "cross_agent_consensus.kimi_cli"],
+        )
+
+    def test_kimi_execution_profile_translates_model_alias(self) -> None:
+        effective = self.resolved_defaults()
+        execution_profiles = effective["execution_profiles"]
+        assert isinstance(execution_profiles, dict)
+        kimi_profile = execution_profiles["kimi-reviewer-default"]
+        assert isinstance(kimi_profile, dict)
+        kimi_profile["model"] = "kimi-code/k3"
+
+        _, parsed_execution_profiles, _, errors = parse_profile_definitions(effective)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            parsed_execution_profiles["kimi-reviewer-default"].command,
+            [
+                "python3",
+                "-m",
+                "cross_agent_consensus.kimi_cli",
+                "--model",
+                "kimi-code/k3",
+            ],
+        )
 
     def test_project_layer_can_switch_execution_profile_without_renaming_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

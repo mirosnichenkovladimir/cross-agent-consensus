@@ -1185,7 +1185,7 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual(payload["effective"]["participants"]["reviewers"], ["reviewer-project"])
             self.assertTrue(any(source["layer"] == "project" and source["present"] for source in payload["sources"]))
 
-    def test_installed_defaults_define_codex_primary_and_codex_claude_reviewers(self) -> None:
+    def test_installed_defaults_define_codex_primary_and_cli_reviewer_profiles(self) -> None:
         result = self.run_cli("config", "show", "--json", "--no-config")
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
@@ -1208,6 +1208,14 @@ class ConsensusToolTests(unittest.TestCase):
         self.assertEqual(
             payload["effective"]["participant_identities"]["claude"]["execution_profile_id"],
             "claude-reviewer-default",
+        )
+        self.assertEqual(
+            payload["effective"]["execution_profiles"]["kimi-reviewer-default"]["command"],
+            ["python3", "-m", "cross_agent_consensus.kimi_cli"],
+        )
+        self.assertEqual(
+            payload["effective"]["participant_identities"]["kimi"]["execution_profile_id"],
+            "kimi-reviewer-default",
         )
 
     def test_review_focus_does_not_replace_configured_reviewers(self) -> None:

@@ -160,12 +160,13 @@ Each helper has a required-flags minimum that `--help` documents; the most commo
 - `consensus normalize`: `--run`, `--round`.
 - `consensus report` / `terminate`: `--run`, `--terminal-condition`.
 
-When a participant is named as a CLI/runtime reviewer or validator, such as Codex CLI, Claude CLI, Hermes, or another external agent process, the Orchestrator MUST start that participant with `scripts/consensus invoke-agent`. Do not satisfy a named external reviewer by using the host's internal subagent feature, an in-chat self-review, or an ordinary shell command followed by `capture`; those paths can preserve output, but they bypass supervised process telemetry and will not create `rounds/<round>/agents/<actor>/session-*` artifacts. Direct `capture` remains valid only for manual/imported evidence and must not be described as live invocation telemetry.
+When a participant is named as a CLI/runtime reviewer or validator, such as Codex CLI, Claude CLI, Hermes, Kimi, or another external agent process, the Orchestrator MUST start that participant with `scripts/consensus invoke-agent`. Do not satisfy a named external reviewer by using the host's internal subagent feature, an in-chat self-review, or an ordinary shell command followed by `capture`; those paths can preserve output, but they bypass supervised process telemetry and will not create `rounds/<round>/agents/<actor>/session-*` artifacts. Direct `capture` remains valid only for manual/imported evidence and must not be described as live invocation telemetry.
 
 For first-class runtime telemetry, use structured stream modes:
 
 - Claude CLI: `claude -p --verbose --output-format stream-json --include-partial-messages ...`
 - Codex CLI: `codex exec --skip-git-repo-check --json -` (the `--skip-git-repo-check` flag is required by `invoke-agent` so that Codex doesn't refuse to start in directories it has not been explicitly trusted; supervised launch surfaces the fix command and exits before allocating a session when it is missing.)
+- Kimi Code CLI: `python3 -m cross_agent_consensus.kimi_cli`; CAC writes the finalized prompt to bridge stdin, and the bridge invokes `kimi --output-format stream-json --prompt <text>` without changing the approved ExecutionProfile argv.
 
 Before normalizing a named CLI reviewer result, check that `scripts/consensus agent-status --run <run> --actor <actor>` succeeds and points to the expected session. If it reports a missing session, rerun that reviewer through `invoke-agent` or explicitly record that the evidence was direct/manual capture without runtime telemetry.
 
@@ -232,9 +233,9 @@ receipt. Never retry an unresolved `mutating` or `external_side_effect`
 attempt without an explicit operator decision recorded through
 `--approve-ambiguous-retry --operator-identity <identity>`.
 
-Codex, Claude, and Hermes provider conversations are separate from CAC process sessions.
+Codex, Claude, Hermes, and Kimi provider conversations are separate from CAC process sessions.
 `session-NNN` names one supervised process; `provider_session_captured` stores
-the Codex thread ID, Claude session UUID, or Hermes session ID. Resume with
+the Codex thread ID, Claude session UUID, Hermes session ID, or Kimi session ID. Resume with
 `invoke-agent --resume-provider-session-entry <entry-id>`. CAC resumes only the
 same ParticipantIdentity, ParticipantProfile role, ExecutionProfile, adapter,
 run, and ArtifactVersion lineage, and only when the selected entry is the

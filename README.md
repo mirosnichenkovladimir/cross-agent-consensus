@@ -8,7 +8,7 @@ This repo separates:
 
 1. `specs/` — normative protocol contract. No concrete model or tool names.
 2. `skills/` — installable manual protocol packages. M2 ships `skills/cross-agent-consensus/`.
-3. `implementations/` — runtime discovery and role-mapping notes for Hermes, Codex, Claude, and later runtimes.
+3. `implementations/` — runtime discovery and role-mapping notes for Hermes, Codex, Claude, Kimi, and later runtimes.
 4. `schemas/` — portable structured data shapes from earlier protocol work.
 
 Core rule: reviewer comments are claims, not commands. An author may accept, reject, partially accept, or ask for clarification, but every material finding must be explicitly handled and auditable.
@@ -28,7 +28,7 @@ Install the manual `cross-agent-consensus` skill package with the terse `cac` in
 ./scripts/install-cac --target all --update
 ```
 
-The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.18.0 adds a first-class `hermes-cli` connector: the stdin bridge converts Hermes quiet output to JSONL, captures and resumes Hermes session IDs, inherits CAC cancellation, and reports `hermes --version`. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
+The current package version is recorded in `skills/cross-agent-consensus/VERSION`; `scripts/consensus --version` prints the installed version. The installer writes managed files from `skills/cross-agent-consensus/managed-manifest.json` and preserves local target modifications. Version 0.19.0 adds a first-class `kimi-cli` connector: `python3 -m cross_agent_consensus.kimi_cli` reads CAC's finalized prompt from stdin, invokes Kimi headless mode, parses Kimi JSONL, captures and resumes Kimi session IDs, inherits CAC cancellation, and reports `kimi --version`. Provider conversations still resume only through a bound `provider_session_captured` RunJournal entry.
 
 Trigger examples after install:
 
@@ -106,6 +106,15 @@ cross_agent_consensus.hermes_cli --ignore-rules`. It supports declarative
 `model`, JSONL output, provider-session continuation, process-group
 cancellation, and version detection. Hermes owns authentication and provider
 configuration under its home directory; CAC records no credential values.
+
+`kimi-reviewer-default` binds the `kimi-cli` adapter to `python3 -m
+cross_agent_consensus.kimi_cli`. CAC writes the finalized prompt to bridge
+stdin, leaving the approved ExecutionProfile argv unchanged. The bridge invokes
+Kimi with `--output-format stream-json`; the adapter parses assistant and tool
+records and treats `session.resume_hint` as the terminal provider-session
+receipt. An optional ExecutionProfile `model`, such as `kimi-code/k3`, maps to
+the bridge's `--model` option. Kimi owns authentication and provider
+configuration under `KIMI_CODE_HOME`; CAC records no credential values.
 
 Version 0.13.0 accepts only `cross-agent-consensus-config-2`; migrate `reviewer_clis` entries to `execution_profiles` plus `participant_identities` before loading the configuration.
 

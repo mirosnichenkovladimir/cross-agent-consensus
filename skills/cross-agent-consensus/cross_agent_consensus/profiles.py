@@ -61,6 +61,22 @@ def _insert_before_stdin_marker(command: list[str], arguments: list[str]) -> lis
     return result
 
 
+def _model_selector_names(adapter_id: str, command: list[str]) -> set[str]:
+    bridge_modules = {
+        "hermes-cli": "cross_agent_consensus.hermes_cli",
+        "kimi-cli": "cross_agent_consensus.kimi_cli",
+    }
+    bridge_module = bridge_modules.get(adapter_id)
+    if bridge_module and any(
+        argument == "-m"
+        and index + 1 < len(command)
+        and command[index + 1] == bridge_module
+        for index, argument in enumerate(command)
+    ):
+        return {"--model"}
+    return {"-m", "--model"}
+
+
 def _codex_config_keys(command: list[str]) -> set[str]:
     keys: set[str] = set()
     index = 0
@@ -90,9 +106,11 @@ def effective_execution_command(
     additions: list[str] = []
     codex_config_keys = _codex_config_keys(command) if adapter_id == "codex-cli" else set()
     if model_id is not None:
-        if adapter_id not in {"codex-cli", "claude-cli", "hermes-cli"}:
+        if adapter_id not in {"codex-cli", "claude-cli", "hermes-cli", "kimi-cli"}:
             errors.append(f"model is not supported by adapter {adapter_id}")
-        elif _contains_option(command, {"-m", "--model"}) or "model" in codex_config_keys:
+        elif _contains_option(
+            command, _model_selector_names(adapter_id, command)
+        ) or "model" in codex_config_keys:
             errors.append("model must be declared either in model or command, not both")
         else:
             additions.extend(["--model", model_id])

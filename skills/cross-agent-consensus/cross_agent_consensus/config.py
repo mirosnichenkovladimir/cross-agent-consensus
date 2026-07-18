@@ -133,6 +133,14 @@ def legacy_adapter_for_command(command: list[str]) -> tuple[str, str]:
             for index in range(len(command))
         )
         return "claude-cli", "stream_json" if has_stream_json else "raw_stdout"
+    if executable == "kimi":
+        has_stream_json = "--output-format=stream-json" in command or any(
+            command[index] == "--output-format"
+            and index + 1 < len(command)
+            and command[index + 1] == "stream-json"
+            for index in range(len(command))
+        )
+        return "kimi-cli", "stream_json" if has_stream_json else "raw_stdout"
     return "generic-cli", "raw_stdout"
 
 

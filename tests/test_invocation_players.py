@@ -10,12 +10,15 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "skills" / "cross-agent-con
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from cross_agent_consensus.invocation.adapters import (
+    KIMI_BRIDGE_MODULE,
     PLAYER_ALIASES,
     ClaudeCliPlayer,
     CodexCliPlayer,
     GenericCliPlayer,
     HermesCliPlayer,
+    KimiCliPlayer,
     detected_hermes_version,
+    detected_kimi_version,
     get_player_adapter,
 )
 from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths
@@ -235,6 +238,85 @@ class InvocationPlayerTests(unittest.TestCase):
                 (detected_hermes_version(sys.executable) or "").startswith("Python")
             )
 
+    def test_kimi_bridge_events_session_resume_and_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            paths = session_paths(tmp / "session-001")
+            paths.session.mkdir()
+            prompt = tmp / "prompt.md"
+            prompt.write_text("inspect the Kimi connector\n", encoding="utf-8")
+            inv = invocation(
+                tmp,
+                [
+                    sys.executable,
+                    "-m",
+                    KIMI_BRIDGE_MODULE,
+                    "--model",
+                    "kimi-code/k3",
+                ],
+                "kimi-cli",
+            )
+            inv.prompt_path = prompt
+            inv.output_mode = "stream_json"
+            adapter = KimiCliPlayer()
+
+            spec = adapter.build_command(inv)
+            self.assertEqual(spec.prompt_transport, "stdin")
+            self.assertEqual(spec.argv, inv.command)
+            self.assertTrue(adapter.command_requests_json(inv.command))
+            self.assertEqual(adapter.profile_command_errors(inv.command), [])
+
+            lines = [
+                {"role": "assistant", "tool_calls": [{"id": "tool-1"}]},
+                {"role": "tool", "tool_call_id": "tool-1", "content": "ok"},
+                {"role": "assistant", "content": "FINAL"},
+                {
+                    "role": "meta",
+                    "type": "session.resume_hint",
+                    "session_id": "kimi-123",
+                },
+            ]
+            paths.stdout.write_text(
+                "".join(json.dumps(line) + "\n" for line in lines),
+                encoding="utf-8",
+            )
+            events = adapter.parse_stream_events(
+                "stdout",
+                paths.stdout.read_bytes(),
+                {"stdout": ""},
+                inv,
+            )
+            adapter.extract_final_output(paths, require_structured=True)
+
+            self.assertEqual(
+                [event["normalized_type"] for event in events],
+                ["tool_call", "tool_result", "message", "final"],
+            )
+            self.assertEqual(
+                paths.final_output.read_text(encoding="utf-8"), "FINAL\n"
+            )
+            self.assertEqual(adapter.extract_provider_session_id(paths), "kimi-123")
+            self.assertEqual(
+                adapter.build_resume_command(inv.command, "kimi-123"),
+                [*inv.command, "--session", "kimi-123"],
+            )
+            self.assertTrue(
+                adapter.has_native_resume_selector(
+                    [
+                        sys.executable,
+                        "-m",
+                        KIMI_BRIDGE_MODULE,
+                        "--session",
+                        "kimi-123",
+                    ]
+                )
+            )
+            self.assertTrue(adapter.probe(inv.command).supports_resume)
+            detected_kimi_version.cache_clear()
+            self.assertTrue(
+                (detected_kimi_version(sys.executable) or "").startswith("Python")
+            )
+
     def test_structured_player_parses_events_and_final_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
@@ -268,12 +350,14 @@ class PlayerAliasTests(unittest.TestCase):
         self.assertIsInstance(get_player_adapter("generic"), GenericCliPlayer)
         self.assertIsInstance(get_player_adapter("deepseek"), GenericCliPlayer)
         self.assertIsInstance(get_player_adapter("hermes"), HermesCliPlayer)
+        self.assertIsInstance(get_player_adapter("kimi"), KimiCliPlayer)
 
     def test_canonical_player_ids_still_resolve(self) -> None:
         self.assertIsInstance(get_player_adapter("codex-cli"), CodexCliPlayer)
         self.assertIsInstance(get_player_adapter("claude-cli"), ClaudeCliPlayer)
         self.assertIsInstance(get_player_adapter("generic-cli"), GenericCliPlayer)
         self.assertIsInstance(get_player_adapter("hermes-cli"), HermesCliPlayer)
+        self.assertIsInstance(get_player_adapter("kimi-cli"), KimiCliPlayer)
 
     def test_unknown_player_error_lists_players_and_aliases(self) -> None:
         with self.assertRaises(ValueError) as exc:
@@ -283,6 +367,7 @@ class PlayerAliasTests(unittest.TestCase):
             "codex-cli",
             "claude-cli",
             "hermes-cli",
+            "kimi-cli",
             "manual",
             "generic-cli",
             "deepseek-cli",

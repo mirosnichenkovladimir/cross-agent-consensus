@@ -195,7 +195,7 @@ protocol records. Version-1 journals remain readable for runs whose recorded
 package version predates 0.10.0 and which have no version-2 anchor. A mutable
 event `schema_version` value alone cannot select legacy validation.
 
-For resumable Codex and Claude adapters, `provider_session_captured` binds a
+For resumable Codex, Claude, Hermes, and Kimi adapters, `provider_session_captured` binds a
 provider conversation identifier to the distinct CAC `session-NNN`, execution
 attempt, ParticipantIdentity, ParticipantProfile, ExecutionProfile, phase,
 ArtifactVersion lineage root, definition digest, prompt digest, and effective

@@ -46,7 +46,7 @@ When a host loads this skill and the user invokes `CAC`:
 7. For Markdown or plain-text outputs, default to `profile=document-consensus`; for code/implementation tasks, require explicit validators in Policy before declaring consensus.
 8. If the user supplied only a terse command, infer safe defaults documented in `SKILL.md` and stop only for missing material policy/scope/participant/validator decisions.
 9. Store the exact prompt that will be sent to each Author/Reviewer/Validator under `rounds/round-NNN/prompts/` before invocation and reference it from the related record or notes. Use `scripts/consensus prompt` when present; it must run the equivalent pre-execution validation before writing non-draft prompts.
-10. If an Author/Reviewer/Validator Participant Identity is bound to an explicitly named and authorized non-manual Execution Profile, run `scripts/consensus invocation-ready` when present, then invoke it with `scripts/consensus invoke-agent` after saving the prompt; do not stop at a manual handoff merely because it is cross-runtime. Do not replace a named Codex/Claude/Hermes reviewer with a host-internal subagent or in-chat review when the CLI can be run, because that bypasses `rounds/<round>/agents/<actor>/session-*` telemetry. A reviewer Execution Profile with argv requires a completed reviewer invocation session for RawReviewerOutput from that Participant Identity. Authorization means the operator has approved the exact command and profile binding for this run, or Policy declares `unattended_invocation: true` with scope limits. `invoke-agent` binds the Participant Identity, Participant Profile, Execution Profile, exact prompt and argv digests, working directory, and readable local ArtifactVersion digest to OperatorApproval; drift requires a new approval. Persistent config files must not contain secret values or enable unattended invocation. Store raw stdout/stderr or raw model output under `rounds/round-NNN/raw/` and/or the appropriate lifecycle record with `scripts/consensus capture` when present before normalization. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not availability failures.
+10. If an Author/Reviewer/Validator Participant Identity is bound to an explicitly named and authorized non-manual Execution Profile, run `scripts/consensus invocation-ready` when present, then invoke it with `scripts/consensus invoke-agent` after saving the prompt; do not stop at a manual handoff merely because it is cross-runtime. Do not replace a named Codex/Claude/Hermes/Kimi reviewer with a host-internal subagent or in-chat review when the CLI can be run, because that bypasses `rounds/<round>/agents/<actor>/session-*` telemetry. A reviewer Execution Profile with argv requires a completed reviewer invocation session for RawReviewerOutput from that Participant Identity. Authorization means the operator has approved the exact command and profile binding for this run, or Policy declares `unattended_invocation: true` with scope limits. `invoke-agent` binds the Participant Identity, Participant Profile, Execution Profile, exact prompt and argv digests, working directory, and readable local ArtifactVersion digest to OperatorApproval; drift requires a new approval. Persistent config files must not contain secret values or enable unattended invocation. Store raw stdout/stderr or raw model output under `rounds/round-NNN/raw/` and/or the appropriate lifecycle record with `scripts/consensus capture` when present before normalization. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not availability failures.
 11. Treat `/tmp`, host process logs, chat transcripts, and terminal scrollback as scratch unless copied into `runs/<run_id>/` and referenced from records.
 12. Materialize every participant output as a durable run artifact before using it. This applies no matter how the participant was invoked: local subagent, host tool, external CLI, manual human handoff, background session, or another mechanism. The run must contain the relevant prompt when applicable, raw output under `rounds/round-NNN/raw/` or an immutable lifecycle record, and the corresponding protocol record such as `RawReviewerOutput`, `ValidationEvidence`, `ArtifactVersion`, or `ReReviewDecision`.
 13. Preserve first-round reviewer isolation: reviewers must not see other reviewers' findings before producing Raw Findings. When invoking multiple Reviewers directly in the same fresh-review round, all same-round Reviewer prompts must be finalized and written to `rounds/round-001/prompts/reviewers/` before the first Reviewer CLI is invoked. Same-round Reviewer outputs must not be referenced in, or readable by, prompt construction for any other Reviewer in that round.
@@ -147,6 +147,16 @@ ParticipantIdentity/profile ownership remain mandatory. On macOS, cancellation
 uses `libproc` start time for PID-reuse protection instead of shelling out to
 `ps`.
 
+The built-in `kimi-reviewer-default` profile uses adapter `kimi-cli` and
+`python3 -m cross_agent_consensus.kimi_cli`. CAC writes the finalized prompt to
+bridge stdin, so the argv covered by exact-input approval remains unchanged.
+The bridge invokes Kimi headless mode and relays `stream-json`; the adapter
+parses assistant and tool records, treats `session.resume_hint` as the terminal
+receipt, maps ExecutionProfile `model` to bridge option `--model`, and resumes
+through bridge option `--session <id>`. Kimi authentication and provider
+configuration stay under `KIMI_CODE_HOME`; CAC passes only allowlisted
+environment-variable names.
+
 ## Execution attempts
 
 `invoke-agent` appends `execution_attempt_started` to `events.jsonl` before it
@@ -179,7 +189,7 @@ then binds the new `ArtifactVersion` record hash to that attempt.
 ## Provider-session continuation
 
 CAC `session-NNN` identifies one supervised operating-system process. A Codex
-thread ID, Claude session UUID, or Hermes session ID identifies the provider conversation that may
+thread ID, Claude session UUID, Hermes session ID, or Kimi session ID identifies the provider conversation that may
 span several CAC process sessions. After a successful resumable-provider exit,
 CAC extracts that provider identifier and appends `provider_session_captured`
 before it writes promoted terminal output.
