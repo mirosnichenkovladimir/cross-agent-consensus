@@ -831,6 +831,31 @@ class RunAuditTests(unittest.TestCase):
 
         self.assertTrue(any("invalid run phase transition terminated -> awaiting_review" in message for message in messages))
 
+    def test_journal_allows_late_findings_to_return_through_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            run = Path(tmp_name) / "late-findings-run"
+            run.mkdir()
+            transitions = [
+                ("not_initialized", "awaiting_review"),
+                ("awaiting_review", "awaiting_validation"),
+                ("awaiting_validation", "awaiting_normalization"),
+                ("awaiting_normalization", "awaiting_author_response"),
+                ("awaiting_author_response", "awaiting_validation"),
+            ]
+            for index, (phase_before, phase_after) in enumerate(transitions, 1):
+                append_run_event_locked(
+                    run,
+                    f"transition-{index}",
+                    actor_identity="orchestrator",
+                    phase_before=phase_before,
+                    phase_after=phase_after,
+                )
+
+            messages = run_event_messages(run)
+
+        self.assertFalse(any("invalid run phase transition" in message for message in messages))
+        self.assertFalse(any("does not match previous phase_after" in message for message in messages))
+
     def test_event_anchor_detects_suffix_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             run, _artifact = _stage_run(Path(tmp_name))

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.19.2] - 2026-07-18
+
+### Fixed
+- Kimi-hosted configuration discovery now reads
+  `$KIMI_CODE_HOME/skills/cross-agent-consensus/config/config.local.yaml`,
+  defaulting to `~/.kimi-code` like the installer and self-test commands.
+- Protocol record discovery excludes supervised `agents/` session evidence, so
+  reviewer headings such as `## Finding ...` cannot be parsed as CAC records.
+- The RunJournal accepts late structured findings returning a run from
+  validation through normalization and classification before validation
+  resumes.
+- The defaults-focused review-lens test uses `--no-config`; an operator's
+  persistent reviewer selection no longer changes the expected assertion.
+
 ## [0.19.1] - 2026-07-18
 
 ### Added

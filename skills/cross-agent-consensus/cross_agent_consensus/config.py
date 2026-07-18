@@ -211,6 +211,7 @@ def default_user_config_candidates() -> list[Path]:
         skill_root() / "config" / "config.local.yaml",
         Path(os.environ.get("CODEX_HOME", home / ".codex")) / "skills" / "cross-agent-consensus" / "config" / "config.local.yaml",
         Path(os.environ.get("CLAUDE_HOME", home / ".claude")) / "skills" / "cross-agent-consensus" / "config" / "config.local.yaml",
+        Path(os.environ.get("KIMI_CODE_HOME", home / ".kimi-code")) / "skills" / "cross-agent-consensus" / "config" / "config.local.yaml",
         Path(os.environ.get("HERMES_HOME", home / ".hermes")) / "skills" / "cross-agent-consensus" / "config" / "config.local.yaml",
     ]
     return dedupe_paths(candidates)

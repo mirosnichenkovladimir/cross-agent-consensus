@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from cross_agent_consensus.config import (
     CONFIG_SCHEMA_VERSION,
     canonical_config,
+    default_user_config_candidates,
     load_yaml_mapping,
     resolve_config,
     validate_config_shape,
@@ -161,6 +164,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(task_data, {})
         self.assertEqual(resolution.effective["defaults"]["profile"], "implementation-test")
         self.assertEqual(resolution.provenance["defaults.profile"], "cli")
+
+    def test_user_config_candidates_include_kimi_code_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            kimi_code_home = Path(tmp_name) / "kimi-code-home"
+            with patch.dict(os.environ, {"KIMI_CODE_HOME": str(kimi_code_home)}):
+                candidates = default_user_config_candidates()
+
+        self.assertIn(
+            kimi_code_home
+            / "skills"
+            / "cross-agent-consensus"
+            / "config"
+            / "config.local.yaml",
+            candidates,
+        )
 
     def test_defaults_parse_typed_participant_and_execution_profiles(self) -> None:
         participant_profiles, execution_profiles, identities, errors = parse_profile_definitions(

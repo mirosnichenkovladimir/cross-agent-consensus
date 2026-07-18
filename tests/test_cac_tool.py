@@ -1231,6 +1231,7 @@ class ConsensusToolTests(unittest.TestCase):
                 "publication safety",
                 "--review-focus",
                 "API surface",
+                "--no-config",
                 "--run-root",
                 str(tmp / "runs"),
             )

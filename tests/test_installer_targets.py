@@ -58,7 +58,7 @@ class InstallerHarnessTargetTests(unittest.TestCase):
             self.assertIn("kimi [OK]", completed.stdout)
             self.assertEqual(
                 (installed / "VERSION").read_text(encoding="utf-8").strip(),
-                "0.19.1",
+                "0.19.2",
             )
             self.assertTrue((installed / "SKILL.md").is_file())
 
@@ -83,7 +83,7 @@ class InstallerHarnessTargetTests(unittest.TestCase):
                 version = (
                     home / harness_home / "skills" / "cross-agent-consensus" / "VERSION"
                 )
-                self.assertEqual(version.read_text(encoding="utf-8").strip(), "0.19.1")
+                self.assertEqual(version.read_text(encoding="utf-8").strip(), "0.19.2")
 
 
 if __name__ == "__main__":

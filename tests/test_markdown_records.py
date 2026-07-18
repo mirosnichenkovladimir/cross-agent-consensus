@@ -542,7 +542,14 @@ class MarkdownRecordTests(unittest.TestCase):
         self.assertEqual(records[0].data["final_artifact_version_id_or_null"], "v3")
         self.assertEqual(records[0].data["_aliases_consumed"], ["target_artifact_version_id"])
 
-    def test_prompt_and_raw_paths_are_protocol_payloads(self) -> None:
+    def test_agent_prompt_and_raw_paths_are_protocol_payloads(self) -> None:
+        self.assertTrue(
+            is_protocol_payload_path(
+                Path(
+                    "runs/example/rounds/round-001/agents/claude/session-001/final-output.md"
+                )
+            )
+        )
         self.assertTrue(
             is_protocol_payload_path(Path("runs/example/rounds/round-001/prompts/reviewers/reviewer.md"))
         )

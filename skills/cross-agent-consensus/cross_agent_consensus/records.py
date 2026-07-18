@@ -39,7 +39,11 @@ def is_protocol_payload_path(path: Path) -> bool:
         if part == "rounds" and index + 2 < len(parts):
             round_part = parts[index + 1]
             payload_part = parts[index + 2]
-            if re.fullmatch(r"round-\d+", round_part) and payload_part in {"prompts", "raw"}:
+            if re.fullmatch(r"round-\d+", round_part) and payload_part in {
+                "agents",
+                "prompts",
+                "raw",
+            }:
                 return True
     return False
 

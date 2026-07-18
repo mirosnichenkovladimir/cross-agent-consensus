@@ -52,6 +52,7 @@ RUN_PHASE_TRANSITIONS: dict[str, set[str]] = {
         "awaiting_author_response",
         "awaiting_rereview",
         "awaiting_review",
+        "awaiting_validation",
         "terminated",
     },
     "awaiting_rereview": {
@@ -64,6 +65,8 @@ RUN_PHASE_TRANSITIONS: dict[str, set[str]] = {
     "awaiting_validation": {
         "awaiting_validation",
         "awaiting_review",
+        "awaiting_normalization",
+        "awaiting_author_response",
         "ready_for_termination",
         "terminated",
     },
