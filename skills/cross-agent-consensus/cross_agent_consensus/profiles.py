@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from typing import Any
@@ -11,6 +12,7 @@ from cross_agent_consensus.models import (
     ExecutionProfile,
     ParticipantIdentity,
     ParticipantProfile,
+    RateLimitCircuitBreaker,
     Record,
     ResolvedInvocationProfile,
 )
@@ -191,6 +193,8 @@ def parse_profile_definitions(
             "output_mode",
             "supports_resume",
             "env",
+            "max_runtime_seconds",
+            "rate_limit_circuit_breaker",
         }
         unknown = sorted(set(raw_profile) - allowed)
         if unknown:
@@ -203,6 +207,8 @@ def parse_profile_definitions(
         env_allowlist = _string_list(raw_profile.get("env", []))
         model_id = raw_profile.get("model")
         reasoning_effort = raw_profile.get("reasoning_effort")
+        max_runtime_seconds = raw_profile.get("max_runtime_seconds")
+        raw_rate_limit_breaker = raw_profile.get("rate_limit_circuit_breaker")
         if not isinstance(adapter_id, str) or not adapter_id:
             errors.append(f"{prefix}.adapter must be a non-empty string")
             continue
@@ -230,6 +236,60 @@ def parse_profile_definitions(
         if reasoning_effort is not None and not isinstance(reasoning_effort, str):
             errors.append(f"{prefix}.reasoning_effort must be a string when present")
             continue
+        if max_runtime_seconds is not None and (
+            not isinstance(max_runtime_seconds, (int, float))
+            or isinstance(max_runtime_seconds, bool)
+            or not math.isfinite(float(max_runtime_seconds))
+            or float(max_runtime_seconds) <= 0
+        ):
+            errors.append(f"{prefix}.max_runtime_seconds must be a finite number greater than zero")
+            continue
+        rate_limit_breaker: RateLimitCircuitBreaker | None = None
+        if raw_rate_limit_breaker is not None:
+            if not isinstance(raw_rate_limit_breaker, dict):
+                errors.append(f"{prefix}.rate_limit_circuit_breaker must be a mapping or null")
+                continue
+            unknown_breaker_keys = sorted(
+                set(raw_rate_limit_breaker)
+                - {
+                    "max_consecutive_429_events",
+                    "max_cumulative_retry_delay_seconds",
+                }
+            )
+            if unknown_breaker_keys:
+                errors.append(
+                    f"{prefix}.rate_limit_circuit_breaker unknown keys: "
+                    + ", ".join(unknown_breaker_keys)
+                )
+                continue
+            consecutive = raw_rate_limit_breaker.get("max_consecutive_429_events")
+            cumulative = raw_rate_limit_breaker.get("max_cumulative_retry_delay_seconds")
+            if not isinstance(consecutive, int) or isinstance(consecutive, bool) or consecutive < 1:
+                errors.append(
+                    f"{prefix}.rate_limit_circuit_breaker.max_consecutive_429_events "
+                    "must be an integer greater than zero"
+                )
+                continue
+            if (
+                not isinstance(cumulative, (int, float))
+                or isinstance(cumulative, bool)
+                or not math.isfinite(float(cumulative))
+                or float(cumulative) <= 0
+            ):
+                errors.append(
+                    f"{prefix}.rate_limit_circuit_breaker.max_cumulative_retry_delay_seconds "
+                    "must be a finite number greater than zero"
+                )
+                continue
+            if adapter_id != "kimi-cli":
+                errors.append(
+                    f"{prefix}.rate_limit_circuit_breaker is supported only by adapter kimi-cli"
+                )
+                continue
+            rate_limit_breaker = RateLimitCircuitBreaker(
+                max_consecutive_429_events=consecutive,
+                max_cumulative_retry_delay_seconds=float(cumulative),
+            )
         from cross_agent_consensus.invocation.readiness import secret_argv_errors
 
         command_secret_errors = secret_argv_errors(command)
@@ -307,6 +367,10 @@ def parse_profile_definitions(
             output_mode=output_mode,
             supports_resume=supports_resume,
             env_allowlist=env_allowlist,
+            max_runtime_seconds_or_null=(
+                float(max_runtime_seconds) if max_runtime_seconds is not None else None
+            ),
+            rate_limit_circuit_breaker_or_null=rate_limit_breaker,
         )
 
     raw_identities = effective.get("participant_identities", {})
@@ -403,6 +467,19 @@ def resolved_profile_payload(effective: dict[str, Any]) -> tuple[dict[str, Any],
             "output_mode": profile.output_mode,
             "supports_resume": profile.supports_resume,
             "env_allowlist": profile.env_allowlist,
+            "max_runtime_seconds_or_null": profile.max_runtime_seconds_or_null,
+            "rate_limit_circuit_breaker_or_null": (
+                {
+                    "max_consecutive_429_events": (
+                        profile.rate_limit_circuit_breaker_or_null.max_consecutive_429_events
+                    ),
+                    "max_cumulative_retry_delay_seconds": (
+                        profile.rate_limit_circuit_breaker_or_null.max_cumulative_retry_delay_seconds
+                    ),
+                }
+                if profile.rate_limit_circuit_breaker_or_null is not None
+                else None
+            ),
         }
         for profile_id, profile in sorted(execution_profiles.items())
     }
@@ -438,6 +515,8 @@ def invocation_profile_from_records(
     output_mode = execution.get("output_mode")
     supports_resume = execution.get("supports_resume")
     env_allowlist = execution.get("env_allowlist")
+    max_runtime_seconds = execution.get("max_runtime_seconds_or_null")
+    raw_rate_limit_breaker = execution.get("rate_limit_circuit_breaker_or_null")
     if (
         not isinstance(adapter_id, str)
         or not isinstance(command, list)
@@ -447,6 +526,17 @@ def invocation_profile_from_records(
         or not isinstance(env_allowlist, list)
     ):
         return None
+    if max_runtime_seconds is not None and not isinstance(max_runtime_seconds, (int, float)):
+        return None
+    rate_limit_breaker = None
+    if raw_rate_limit_breaker is not None:
+        if not isinstance(raw_rate_limit_breaker, dict):
+            return None
+        consecutive = raw_rate_limit_breaker.get("max_consecutive_429_events")
+        cumulative = raw_rate_limit_breaker.get("max_cumulative_retry_delay_seconds")
+        if not isinstance(consecutive, int) or not isinstance(cumulative, (int, float)):
+            return None
+        rate_limit_breaker = RateLimitCircuitBreaker(consecutive, float(cumulative))
     if not all(isinstance(item, str) for item in command + env_allowlist):
         return None
     return ResolvedInvocationProfile(
@@ -458,6 +548,10 @@ def invocation_profile_from_records(
         output_mode=output_mode,
         supports_resume=supports_resume,
         env_allowlist=list(env_allowlist),
+        max_runtime_seconds_or_null=(
+            float(max_runtime_seconds) if max_runtime_seconds is not None else None
+        ),
+        rate_limit_circuit_breaker_or_null=rate_limit_breaker,
     )
 
 
@@ -549,6 +643,9 @@ def bind_recorded_invocation_profile(
     args.output_mode = profile.output_mode
     args.execution_profile_supports_resume = profile.supports_resume
     args.env_allowlist = profile.env_allowlist
+    if getattr(args, "max_runtime_seconds", None) is None:
+        args.max_runtime_seconds = profile.max_runtime_seconds_or_null
+    args.rate_limit_circuit_breaker = profile.rate_limit_circuit_breaker_or_null
     errors.extend(
         participant_phase_role_errors(
             records,

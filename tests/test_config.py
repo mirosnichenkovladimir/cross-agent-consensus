@@ -205,6 +205,42 @@ class ConfigTests(unittest.TestCase):
             execution_profiles["kimi-reviewer-default"].command,
             ["python3", "-m", "cross_agent_consensus.kimi_cli"],
         )
+        kimi_breaker = execution_profiles[
+            "kimi-reviewer-default"
+        ].rate_limit_circuit_breaker_or_null
+        self.assertIsNotNone(kimi_breaker)
+        assert kimi_breaker is not None
+        self.assertEqual(kimi_breaker.max_consecutive_429_events, 3)
+        self.assertEqual(kimi_breaker.max_cumulative_retry_delay_seconds, 120.0)
+
+    def test_execution_profile_accepts_runtime_deadline_and_rejects_breaker_for_non_kimi_adapter(
+        self,
+    ) -> None:
+        effective = copy.deepcopy(self.resolved_defaults())
+        effective["execution_profiles"]["kimi-reviewer-default"][
+            "max_runtime_seconds"
+        ] = 900
+
+        _, execution_profiles, _, errors = parse_profile_definitions(effective)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            execution_profiles["kimi-reviewer-default"].max_runtime_seconds_or_null,
+            900.0,
+        )
+
+        effective["execution_profiles"]["codex-reviewer-default"][
+            "rate_limit_circuit_breaker"
+        ] = {
+            "max_consecutive_429_events": 3,
+            "max_cumulative_retry_delay_seconds": 120,
+        }
+        _, _, _, errors = parse_profile_definitions(effective)
+
+        self.assertTrue(
+            any("supported only by adapter kimi-cli" in error for error in errors),
+            errors,
+        )
 
     def test_kimi_execution_profile_translates_model_alias(self) -> None:
         effective = self.resolved_defaults()

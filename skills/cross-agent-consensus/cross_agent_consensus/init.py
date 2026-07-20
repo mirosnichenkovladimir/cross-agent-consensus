@@ -10,6 +10,7 @@ from cross_agent_consensus.integrity import content_locator_base
 from cross_agent_consensus.io import hash_locator, read_cac_version
 from cross_agent_consensus.layout import ROUND_FIRST_LAYOUT_VERSION, round_dir
 from cross_agent_consensus.markdown_records import frontmatter
+from cross_agent_consensus.review_budget import review_budget_ledger_path
 
 
 DOCUMENT_VALIDATORS = [
@@ -54,6 +55,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
     policy_id = f"policy-{run_id}"
     participants_id = f"participants-{run_id}"
     scope_id = f"review-scope-{run_id}"
+    review_budget_id = getattr(args, "review_budget_id", None) or f"review-budget-{run_id}"
     batch_id = "review-batch-round-1-fresh_review"
     first_round = round_dir(run, "round-1")
     first_round_rel = first_round.relative_to(run)
@@ -72,6 +74,7 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         f"- raw-output payload root: `{first_round_rel}/raw/`",
         f"- run id source: `{'user-supplied' if args.run_id else 'generated'}`",
         "- initial artifact version id: `v1`",
+        f"- review budget id: `{review_budget_id}`",
         "- first review batch id: `review-batch-round-1-fresh_review`",
         f"- first round path: `{first_round_rel}/`",
         f"- first review batch path: `{first_round_rel}/round.md`",
@@ -192,6 +195,26 @@ def build_init_files(args: argparse.Namespace, run_id: str, created_at: str) -> 
         "- In-scope overrides:",
         "- Out-of-scope overrides:",
         "- Round-limit overrides:",
+        "",
+        f"## ReviewBudget {review_budget_id}",
+        frontmatter(
+            {
+                "record_type": "ReviewBudget",
+                "schema_version": "m2-markdown-2",
+                "run_id": run_id,
+                "actor_identity": args.orchestrator,
+                "created_at": created_at,
+                "review_budget_id": review_budget_id,
+                "max_launched_review_batches": getattr(args, "max_launched_review_batches", 3),
+                "max_fresh_review_batches": args.max_fresh_review_rounds,
+                "ledger_path": review_budget_ledger_path(run, review_budget_id),
+            }
+        ),
+        "",
+        "### Review Budget Notes",
+        "",
+        "- A replacement run must reuse this review_budget_id.",
+        "- Initialization does not consume a batch; the first reviewer launch does.",
         "",
     ]
 

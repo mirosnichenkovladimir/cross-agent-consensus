@@ -112,6 +112,11 @@ class GenericCliPlayer:
     ) -> list[dict[str, Any]]:
         return []
 
+    def provider_rate_limit_retry_seconds(
+        self, payload: dict[str, Any], native_type: str
+    ) -> float | None:
+        return None
+
 
 class StructuredJsonCliPlayer(GenericCliPlayer):
     def probe(self, command: list[str]) -> PlayerCapabilities:
@@ -661,6 +666,16 @@ class KimiCliPlayer(StructuredJsonCliPlayer):
         if native_type == "tool.result":
             return "tool_result"
         return super().normalized_event_type(payload, native_type)
+
+    def provider_rate_limit_retry_seconds(
+        self, payload: dict[str, Any], native_type: str
+    ) -> float | None:
+        if native_type != "turn.step.retrying" or payload.get("status_code") != 429:
+            return None
+        delay_ms = payload.get("delay_ms")
+        if isinstance(delay_ms, (int, float)) and not isinstance(delay_ms, bool):
+            return max(0.0, float(delay_ms) / 1000.0)
+        return 0.0
 
     def extract_final_text(self, payload: dict[str, Any]) -> str | None:
         if payload.get("role") == "assistant":

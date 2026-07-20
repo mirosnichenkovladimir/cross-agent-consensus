@@ -62,6 +62,27 @@ def invocation(tmp: Path, command: list[str], player_id: str = "generic-cli") ->
 
 
 class InvocationPlayerTests(unittest.TestCase):
+    def test_kimi_adapter_recognizes_native_http_429_retry_delay(self) -> None:
+        adapter = KimiCliPlayer()
+
+        self.assertEqual(
+            adapter.provider_rate_limit_retry_seconds(
+                {
+                    "type": "turn.step.retrying",
+                    "status_code": 429,
+                    "delay_ms": 45000,
+                },
+                "turn.step.retrying",
+            ),
+            45.0,
+        )
+        self.assertIsNone(
+            adapter.provider_rate_limit_retry_seconds(
+                {"type": "turn.step.retrying", "status_code": 500},
+                "turn.step.retrying",
+            )
+        )
+
     def test_generic_player_probe_and_command_spec(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)

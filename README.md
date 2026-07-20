@@ -45,7 +45,7 @@ Use CAC to do <task> with main <author> and validators <reviewers>.
 
 When `skills/cross-agent-consensus/scripts/consensus` is available, use it for deterministic run bookkeeping:
 
-- `init` creates the run folder, participant records, first review batch, artifact record, and config-resolution record.
+- `init` creates the run folder, participant records, shared ReviewBudget record, first review batch, artifact record, and config-resolution record.
 - `config show|validate|paths|setup` handles installed, user-local, project, task-file, and CLI configuration.
 - `prompt` writes exact reviewer, author, validator, re-review, and final-report prompts into the run folder.
 - `capture` preserves raw reviewer, validator, and manual evidence output as protocol records.
@@ -62,7 +62,7 @@ When `skills/cross-agent-consensus/scripts/consensus` is available, use it for d
   digests; `validate --run-events` checks the hash-chained mutation journal and
   `.cac-events-anchor.json` against deletion, edits, and suffix truncation.
 - `conclusion-validation` creates a `scope_triage` batch where the same reviewers validate proposed Normalized Finding conclusions. This is not a fresh review; reviewers answer `agree`, `disagree`, or `needs_human` and must include rationale.
-- `invoke-agent`, `agent-status`, `agent-watch`, and `agent-cancel` run and monitor explicitly configured external reviewer CLIs with session telemetry.
+- `invoke-agent`, `agent-status`, `agent-watch`, and `agent-cancel` run and monitor explicitly configured external reviewer CLIs with session telemetry. Readiness, exact approval, and ReviewBudget admission finish before session allocation; `--max-runtime-seconds` bounds active providers.
 - `next --json` derives a byte-stable `NextActionPlan` from validated protocol records, `events.jsonl`, `ConfigResolution`, and Execution Profiles. It names runnable actions, missing/conflicting records, pending checkpoint choices, and terminal status; it launches nothing and writes nothing. `record_journal_sha256` hashes only the ordered protocol-record frontmatter and RunJournal entries; integrity diagnostics separately cover artifact, prompt, evidence, and session files.
 - `terminate` writes the terminal human verification artifact, `report.md`.
 
@@ -116,6 +116,9 @@ records and treats `session.resume_hint` as the terminal provider-session
 receipt. An optional ExecutionProfile `model`, such as `kimi-code/k3`, maps to
 the bridge's `--model` option. Kimi owns authentication and provider
 configuration under `KIMI_CODE_HOME`; CAC records no credential values.
+The default Kimi Execution Profile opens its circuit after three consecutive
+HTTP 429 retries or 120 seconds of cumulative provider-requested delay. A
+later launch needs explicit operator approval for the rate-limit retry.
 
 Version 0.13.0 accepts only `cross-agent-consensus-config-2`; migrate `reviewer_clis` entries to `execution_profiles` plus `participant_identities` before loading the configuration.
 

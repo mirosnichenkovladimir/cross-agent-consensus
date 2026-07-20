@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The authoritative version is `skills/cross-agent-consensus/VERSION`; each entry
 below corresponds to the value committed at that point.
 
+## [0.20.0] - 2026-07-20
+
+### Added
+- New runs record a `ReviewBudget` with a shared, hash-chained ledger. The
+  default budget permits three launched review batches in total and one
+  `fresh_review` batch across replacement runs that reuse the same
+  `review_budget_id`.
+- `invoke-agent` and `run` accept `--max-runtime-seconds`; Execution Profiles
+  may declare the same deadline.
+- The Kimi Execution Profile opens a circuit after three consecutive HTTP 429
+  retry events or 120 seconds of cumulative provider-requested retry delay.
+  A later attempt requires `--approve-provider-rate-limit-retry` and
+  `--operator-identity`.
+
+### Changed
+- Reviewer readiness, exact-input approval, and ReviewBudget admission now
+  complete before CAC allocates `session-NNN`.
+- Reviewer and Re-Reviewer prompts identify the participant role and forbid
+  recursively loading or invoking cross-agent-consensus.
+- Invocation telemetry uses `cross-agent-consensus-invocation-3` and records
+  the resolved runtime deadline and rate-limit circuit policy.
+
+### Fixed
+- Failed preflight no longer inflates supervised-session failure counts.
+- Repeated Kimi 429 retries terminate with `provider_rate_limited` instead of
+  running without a bounded retry policy.
+
 ## [0.19.2] - 2026-07-18
 
 ### Fixed

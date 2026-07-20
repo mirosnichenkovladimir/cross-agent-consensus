@@ -2577,7 +2577,7 @@ class ConsensusToolTests(unittest.TestCase):
             session = run / "rounds" / "round-001" / "agents" / "reviewer-codex" / "session-001"
             self.assertTrue(session.is_dir())
             invocation = json.loads((session / "invocation.json").read_text(encoding="utf-8"))
-            self.assertEqual(invocation["schema_version"], "cross-agent-consensus-invocation-2")
+            self.assertEqual(invocation["schema_version"], "cross-agent-consensus-invocation-3")
             self.assertEqual(invocation["round_id"], "round-001")
             self.assertEqual(invocation["participant_identity"], "reviewer-codex")
             self.assertEqual(invocation["participant_profile_id"], "legacy-inline-participant-profile")
@@ -2603,8 +2603,8 @@ class ConsensusToolTests(unittest.TestCase):
             exit_payload = json.loads((session / "exit.json").read_text(encoding="utf-8"))
             self.assertEqual(exit_payload["final_state"], "completed")
             self.assertEqual(exit_payload["exit_code_or_null"], 0)
-            self.assertIn("final:# Cross-Agent Consensus Reviewer Prompt", (session / "final-output.md").read_text())
-            self.assertIn("final:# Cross-Agent Consensus Reviewer Prompt", raw_output.read_text(encoding="utf-8"))
+            self.assertIn("final:# Artifact Reviewer Prompt", (session / "final-output.md").read_text())
+            self.assertIn("final:# Artifact Reviewer Prompt", raw_output.read_text(encoding="utf-8"))
             # `--raw-output` declares one path; invoke-agent mirrors the extracted
             # final-output beside it so the orchestrator can read parsed content
             # from a predictable sibling without descending into session-NNN/.
@@ -2752,10 +2752,7 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual(result.returncode, 3)
             self.assertIn("--prompt must be under the selected round prompt directory", result.stderr)
             session = run / "rounds" / "round-002" / "agents" / "reviewer-codex" / "session-001"
-            self.assertTrue(session.is_dir())
-            state = json.loads((session / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(state["state"], "failed")
-            self.assertFalse((session / "stdout.raw").is_file())
+            self.assertFalse(session.exists())
 
     def test_invoke_agent_rejects_raw_output_from_other_round(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -2805,10 +2802,7 @@ class ConsensusToolTests(unittest.TestCase):
             self.assertEqual(result.returncode, 3)
             self.assertIn("--raw-output must be under the selected round raw-output directory", result.stderr)
             session = run / "rounds" / "round-002" / "agents" / "reviewer-codex" / "session-001"
-            self.assertTrue(session.is_dir())
-            state = json.loads((session / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(state["state"], "failed")
-            self.assertFalse((session / "stdout.raw").is_file())
+            self.assertFalse(session.exists())
 
     def test_claude_cli_player_parses_stream_json_events_and_final_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:

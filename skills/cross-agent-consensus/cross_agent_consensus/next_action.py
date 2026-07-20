@@ -47,7 +47,14 @@ from cross_agent_consensus.validation import (
 
 
 NEXT_ACTION_PLAN_SCHEMA = "cross-agent-consensus-next-action-plan-1"
-SINGLETON_RECORD_TYPES = ("TaskBrief", "Policy", "Participants", "ReviewScope", "ConfigResolution")
+SINGLETON_RECORD_TYPES = (
+    "TaskBrief",
+    "Policy",
+    "Participants",
+    "ReviewScope",
+    "ReviewBudget",
+    "ConfigResolution",
+)
 
 
 @dataclass(frozen=True)
@@ -780,7 +787,12 @@ def build_next_action_plan(
                 f"execution attempt {attempt_id} is ambiguous after {failure_mode}; "
                 f"operator decision is required before {action_id}"
             )
-            required.append(f"OperatorApproval:ambiguous-retry:{attempt_id}")
+            if attempt.get("operator_decision_reason") == "provider_rate_limit_retry":
+                required.append(
+                    f"OperatorApproval:provider-rate-limit-retry:{attempt_id}"
+                )
+            else:
+                required.append(f"OperatorApproval:ambiguous-retry:{attempt_id}")
         else:
             blockers.append(
                 f"execution attempt {attempt_id} ended as {attempt['event_type']} "

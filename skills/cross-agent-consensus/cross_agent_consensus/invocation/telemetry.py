@@ -20,7 +20,7 @@ from cross_agent_consensus.models import AgentInvocation, AgentSessionPaths, Com
 
 from .session_paths import path_for_json, session_relative
 
-AGENT_INVOCATION_SCHEMA = "cross-agent-consensus-invocation-2"
+AGENT_INVOCATION_SCHEMA = "cross-agent-consensus-invocation-3"
 AGENT_COMMAND_SCHEMA = "cross-agent-consensus-command-1"
 AGENT_STATE_SCHEMA = "cross-agent-consensus-state-1"
 AGENT_EXIT_SCHEMA = "cross-agent-consensus-exit-1"
@@ -207,6 +207,19 @@ def write_invocation_json(paths: AgentSessionPaths, invocation: AgentInvocation)
             "raw_output_path": path_for_json(invocation.raw_output_path, invocation.run),
             "idle_timeout_seconds": invocation.idle_timeout_seconds,
             "stale_timeout_seconds": invocation.stale_timeout_seconds,
+            "max_runtime_seconds_or_null": invocation.max_runtime_seconds,
+            "rate_limit_circuit_breaker_or_null": (
+                {
+                    "max_consecutive_429_events": (
+                        invocation.rate_limit_circuit_breaker.max_consecutive_429_events
+                    ),
+                    "max_cumulative_retry_delay_seconds": (
+                        invocation.rate_limit_circuit_breaker.max_cumulative_retry_delay_seconds
+                    ),
+                }
+                if invocation.rate_limit_circuit_breaker is not None
+                else None
+            ),
             "approved": invocation.approved,
         },
     )

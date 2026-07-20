@@ -18,7 +18,12 @@ from .telemetry import AGENT_STATUS_SCHEMA, event_tail, read_state_without_schem
 # Event types in events.jsonl that indicate an agent error or abnormal terminal state;
 # surfaced as `summary.event_errors` so the orchestrator can decide whether to rerun.
 # Keep in sync with the event types emitted by process_monitor.append_agent_event.
-_AGENT_ERROR_EVENT_TYPES = {"failed", "cancelled"}
+_AGENT_ERROR_EVENT_TYPES = {
+    "failed",
+    "cancelled",
+    "timed_out",
+    "provider_rate_limited",
+}
 
 EMPTY_AGENT_STATUS_SUMMARY: dict[str, int] = {
     "final_output_lines": 0,

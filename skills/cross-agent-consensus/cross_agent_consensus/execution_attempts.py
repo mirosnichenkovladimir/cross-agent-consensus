@@ -160,12 +160,88 @@ def _retry_requires_operator_decision(
     )
 
 
+def _provider_rate_limit_retry_requires_operator_decision(
+    predecessor_terminal: dict[str, Any] | None,
+) -> bool:
+    if predecessor_terminal is None or predecessor_terminal.get("event_type") != "execution_attempt_failed":
+        return False
+    details = predecessor_terminal.get("details")
+    return isinstance(details, dict) and details.get("failure_mode") == "provider_rate_limited"
+
+
+def _assert_retry_authorized(
+    predecessor_start: dict[str, Any] | None,
+    predecessor_terminal: dict[str, Any] | None,
+    retry_safety: str,
+    *,
+    approve_ambiguous_retry: bool,
+    approve_provider_rate_limit_retry: bool,
+    operator_identity: str | None,
+) -> None:
+    predecessor_details = predecessor_start.get("details", {}) if predecessor_start else {}
+    predecessor_safety = str(predecessor_details.get("retry_safety") or retry_safety)
+    if (
+        _retry_requires_operator_decision(
+            predecessor_start, predecessor_terminal, predecessor_safety
+        )
+        and not approve_ambiguous_retry
+    ):
+        predecessor_id = predecessor_details.get("attempt_id")
+        raise ValueError(
+            f"attempt {predecessor_id} is ambiguous and {predecessor_safety}; "
+            "operator decision required via --approve-ambiguous-retry"
+        )
+    if approve_ambiguous_retry and not operator_identity:
+        raise ValueError("--approve-ambiguous-retry requires --operator-identity")
+    if (
+        _provider_rate_limit_retry_requires_operator_decision(predecessor_terminal)
+        and not approve_provider_rate_limit_retry
+    ):
+        predecessor_id = predecessor_details.get("attempt_id")
+        raise ValueError(
+            f"attempt {predecessor_id} ended after provider rate limiting; "
+            "operator decision required via --approve-provider-rate-limit-retry"
+        )
+    if approve_provider_rate_limit_retry and not operator_identity:
+        raise ValueError(
+            "--approve-provider-rate-limit-retry requires --operator-identity"
+        )
+
+
+def assert_execution_attempt_retry_authorized(
+    run: Path,
+    *,
+    participant_identity: str,
+    phase: str,
+    retry_safety: str,
+    approve_ambiguous_retry: bool,
+    approve_provider_rate_limit_retry: bool,
+    operator_identity: str | None,
+) -> None:
+    """Reject an unauthorized retry before CAC allocates a process session."""
+
+    action_id = invocation_action_id(participant_identity, phase)
+    with run_lock(run):
+        predecessor_start, predecessor_terminal = _latest_attempt(
+            _attempt_events(run, action_id)
+        )
+        _assert_retry_authorized(
+            predecessor_start,
+            predecessor_terminal,
+            retry_safety,
+            approve_ambiguous_retry=approve_ambiguous_retry,
+            approve_provider_rate_limit_retry=approve_provider_rate_limit_retry,
+            operator_identity=operator_identity,
+        )
+
+
 def start_execution_attempt(
     invocation: AgentInvocation,
     *,
     retry_safety: str,
     approve_ambiguous_retry: bool,
     ambiguous_retry_operator_identity: str | None = None,
+    approve_provider_rate_limit_retry: bool = False,
 ) -> str:
     """Append the launch intent atomically and return its attempt identifier."""
 
@@ -177,20 +253,14 @@ def start_execution_attempt(
         events = _attempt_events(run, action_id)
         predecessor_start, predecessor_terminal = _latest_attempt(events)
         predecessor_details = predecessor_start.get("details", {}) if predecessor_start else {}
-        predecessor_safety = str(predecessor_details.get("retry_safety") or retry_safety)
-        if (
-            _retry_requires_operator_decision(
-                predecessor_start, predecessor_terminal, predecessor_safety
-            )
-            and not approve_ambiguous_retry
-        ):
-            predecessor_id = predecessor_details.get("attempt_id")
-            raise ValueError(
-                f"attempt {predecessor_id} is ambiguous and {predecessor_safety}; "
-                "operator decision required via --approve-ambiguous-retry"
-            )
-        if approve_ambiguous_retry and not ambiguous_retry_operator_identity:
-            raise ValueError("--approve-ambiguous-retry requires --operator-identity")
+        _assert_retry_authorized(
+            predecessor_start,
+            predecessor_terminal,
+            retry_safety,
+            approve_ambiguous_retry=approve_ambiguous_retry,
+            approve_provider_rate_limit_retry=approve_provider_rate_limit_retry,
+            operator_identity=ambiguous_retry_operator_identity,
+        )
         records = parse_run_records(run)
         attempt_number = len(
             [event for event in events if event.get("event_type") == "execution_attempt_started"]
@@ -230,6 +300,14 @@ def start_execution_attempt(
             "retry_safety": retry_safety,
             "ambiguous_retry_operator_approved": bool(approve_ambiguous_retry),
             "ambiguous_retry_operator_identity_or_null": ambiguous_retry_operator_identity,
+            "provider_rate_limit_retry_operator_approved": bool(
+                approve_provider_rate_limit_retry
+            ),
+            "provider_rate_limit_retry_operator_identity_or_null": (
+                ambiguous_retry_operator_identity
+                if approve_provider_rate_limit_retry
+                else None
+            ),
             "provider_session_resume_reservation_id_or_null": (
                 invocation.provider_session_resume_reservation_id
             ),
@@ -538,10 +616,24 @@ def latest_attempt_statuses(events: list[dict[str, Any]]) -> list[dict[str, Any]
                 "retry_safety": start_details.get("retry_safety"),
                 "event_type": terminal.get("event_type") if terminal else "execution_attempt_incomplete",
                 "failure_mode_or_null": terminal_details.get("failure_mode"),
-                "requires_operator_decision": _retry_requires_operator_decision(
-                    start,
-                    terminal,
-                    str(start_details.get("retry_safety") or "read_only"),
+                "requires_operator_decision": (
+                    _retry_requires_operator_decision(
+                        start,
+                        terminal,
+                        str(start_details.get("retry_safety") or "read_only"),
+                    )
+                    or _provider_rate_limit_retry_requires_operator_decision(terminal)
+                ),
+                "operator_decision_reason": (
+                    "provider_rate_limit_retry"
+                    if _provider_rate_limit_retry_requires_operator_decision(terminal)
+                    else "ambiguous_retry"
+                    if _retry_requires_operator_decision(
+                        start,
+                        terminal,
+                        str(start_details.get("retry_safety") or "read_only"),
+                    )
+                    else None
                 ),
             }
         )

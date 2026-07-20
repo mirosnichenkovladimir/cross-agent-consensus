@@ -21,6 +21,19 @@ from cross_agent_consensus.record_schema import (  # noqa: E402
 
 class OperatorApprovalSchemaTests(unittest.TestCase):
 
+    def test_review_budget_contract_and_overrun_decision_are_registered(self) -> None:
+        self.assertEqual(
+            REQUIRED_FIELDS["ReviewBudget"],
+            [
+                "review_budget_id",
+                "max_launched_review_batches",
+                "max_fresh_review_batches",
+                "ledger_path",
+            ],
+        )
+        self.assertEqual(ID_FIELDS["ReviewBudget"], "review_budget_id")
+        self.assertIn("authorize_review_budget_overrun", ENUMS["decision_type"])
+
     def test_operator_approval_in_required_fields(self) -> None:
         self.assertIn("OperatorApproval", REQUIRED_FIELDS)
         fields = REQUIRED_FIELDS["OperatorApproval"]

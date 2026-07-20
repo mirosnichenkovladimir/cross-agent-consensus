@@ -470,6 +470,18 @@ def execution_attempt_event_messages(events: list[dict[str, Any]]) -> list[str]:
                     messages.append(
                         f"events.jsonl:{sequence}: unsafe retry of {predecessor_id} lacks operator identity"
                     )
+                provider_rate_limit_retry = (
+                    predecessor_state == "failed"
+                    and predecessor_failure == "provider_rate_limited"
+                )
+                if provider_rate_limit_retry and (
+                    details.get("provider_rate_limit_retry_operator_approved") is not True
+                    or not details.get("provider_rate_limit_retry_operator_identity_or_null")
+                ):
+                    messages.append(
+                        f"events.jsonl:{sequence}: provider-rate-limit retry of "
+                        f"{predecessor_id} lacks operator identity"
+                    )
             attempts[attempt_id] = {
                 "details": details,
                 "state": "started",

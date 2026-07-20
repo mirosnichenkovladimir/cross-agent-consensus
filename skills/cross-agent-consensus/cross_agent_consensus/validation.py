@@ -87,11 +87,14 @@ def check_pre_execution(run: Path, snapshot: RunSnapshot | None = None) -> Check
         if not path.exists():
             messages.append(f"missing required path: {path.relative_to(run) if path.is_relative_to(run) else path}")
     records = (snapshot or parse_run_snapshot(run)).records
-    for record_type in ["TaskBrief", "Policy", "Participants", "ReviewScope", "ReviewBatch", "ArtifactVersion"]:
+    required_types = ["TaskBrief", "Policy", "Participants", "ReviewScope", "ReviewBatch", "ArtifactVersion"]
+    if (recorded_run_version(run) or (0, 0, 0)) >= (0, 20, 0):
+        required_types.append("ReviewBudget")
+    for record_type in required_types:
         if first_record(records, record_type) is None:
             messages.append(f"missing required record type: {record_type}")
     for record in records:
-        if record.record_type in {"TaskBrief", "Policy", "Participants", "ReviewScope", "ReviewBatch", "ArtifactVersion"}:
+        if record.record_type in set(required_types):
             for field in COMMON_FIELDS + REQUIRED_FIELDS.get(record.record_type, []):
                 if required_field_missing(record.data, field):
                     messages.append(f"{record.path}:{record.heading_line}: {record.record_type} missing field {field}")

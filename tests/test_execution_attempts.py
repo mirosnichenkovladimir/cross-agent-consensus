@@ -60,6 +60,97 @@ def invoke_args(run: Path, tmp: Path, mode: str, **overrides: object) -> Invocat
 
 
 class ExecutionAttemptTests(unittest.TestCase):
+    def test_readiness_failure_allocates_no_session_or_review_budget_charge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            run, _artifact = _stage_run(tmp)
+            args = invoke_args(run, tmp, "raw", raw_output=str(tmp / "outside.out"))
+
+            rc = cmd_invoke_agent(args)
+            sessions = list(
+                (round_dir(run, "round-1") / "agents" / "reviewer").glob(
+                    "session-*"
+                )
+            )
+            budget_root = run.parent / ".cac-review-budgets"
+            budget_created = budget_root.exists()
+
+        self.assertEqual(rc, 3)
+        self.assertEqual(sessions, [])
+        self.assertFalse(budget_created)
+
+    def test_provider_rate_limit_retry_requires_explicit_operator_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            run, _artifact = _stage_run(tmp)
+            prompt = tmp / "reviewer-prompt.md"
+            prompt.write_text("review", encoding="utf-8")
+            invocation = AgentInvocation(
+                run=run,
+                round_id="round-1",
+                phase="reviewer",
+                participant_identity="reviewer",
+                participant_profile_id="reviewer-profile",
+                execution_profile_id="kimi-reviewer",
+                player_id="kimi-cli",
+                prompt_path=prompt,
+                raw_output_path=tmp / "reviewer.out",
+                command=["provider"],
+                cwd=tmp,
+                approved=True,
+                idle_timeout_seconds=1,
+                stale_timeout_seconds=2,
+                heartbeat_interval_seconds=0.1,
+                session_id="session-001",
+            )
+            invocation.execution_attempt_id = start_execution_attempt(
+                invocation,
+                retry_safety="read_only",
+                approve_ambiguous_retry=False,
+            )
+            append_attempt_observation(
+                invocation,
+                "execution_attempt_failed",
+                failure_mode="provider_rate_limited",
+            )
+            invocation.session_id = "session-002"
+
+            with self.assertRaisesRegex(
+                ValueError, "--approve-provider-rate-limit-retry"
+            ):
+                start_execution_attempt(
+                    invocation,
+                    retry_safety="read_only",
+                    approve_ambiguous_retry=False,
+                )
+            with self.assertRaisesRegex(ValueError, "--operator-identity"):
+                start_execution_attempt(
+                    invocation,
+                    retry_safety="read_only",
+                    approve_ambiguous_retry=False,
+                    approve_provider_rate_limit_retry=True,
+                )
+
+            retry_id = start_execution_attempt(
+                invocation,
+                retry_safety="read_only",
+                approve_ambiguous_retry=False,
+                ambiguous_retry_operator_identity="human-operator",
+                approve_provider_rate_limit_retry=True,
+            )
+            retry_start = attempt_events(run)[-1]
+
+        self.assertTrue(retry_id.endswith("-002"))
+        self.assertTrue(
+            retry_start["details"]["provider_rate_limit_retry_operator_approved"]  # type: ignore[index]
+        )
+        self.assertEqual(
+            retry_start["details"][  # type: ignore[index]
+                "provider_rate_limit_retry_operator_identity_or_null"
+            ],
+            "human-operator",
+        )
+
     def test_success_is_ambiguous_until_protocol_receipt_is_captured(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
@@ -316,7 +407,13 @@ class ExecutionAttemptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
             run, _artifact = _stage_run(tmp)
-            args = invoke_args(run, tmp, "raw")
+            args = invoke_args(
+                run,
+                tmp,
+                "raw",
+                idle_timeout_seconds=1,
+                stale_timeout_seconds=2,
+            )
             self.assertEqual(cmd_invoke_agent(args), 0)
             first_attempt_id = str(attempt_events(run)[0]["details"]["attempt_id"])  # type: ignore[index]
             self.assertEqual(cmd_invoke_agent(args), 0)

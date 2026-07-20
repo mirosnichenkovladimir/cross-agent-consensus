@@ -20,7 +20,7 @@ from .readiness import padded_round_id
 from .session_paths import latest_agent_session
 from .telemetry import event_tail, read_state_without_schema
 
-TERMINAL_STATES = {"completed", "failed", "cancelled"}
+TERMINAL_STATES = {"completed", "failed", "cancelled", "timed_out"}
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 SECRET_ASSIGNMENT_RE = re.compile(

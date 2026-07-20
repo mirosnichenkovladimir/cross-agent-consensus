@@ -112,11 +112,11 @@ scripts/consensus invoke-agent --run <run> --actor <actor> --player <player> \
 while true; do
   scripts/consensus agent-peek --run <run> --actor <actor> --tail 40
   scripts/consensus agent-status --run <run> --actor <actor> --json \
-    | jq -r '.state' | grep -qE '^(completed|failed|cancelled)$' && break
+    | jq -r '.state' | grep -qE '^(completed|failed|cancelled|timed_out)$' && break
   sleep "${PEEK_INTERVAL:-180}"
 done
 
-# 3. Treat completed/failed/cancelled as terminal; agent-cancel on operator interrupt.
+# 3. Treat completed/failed/cancelled/timed_out as terminal; agent-cancel on operator interrupt.
 ```
 
 `invocation.peek.interval_seconds` (default 180) defines the polling cadence. The orchestrator should print a one-line progress update each iteration so the operator is not left blind during multi-minute reviews.
@@ -128,7 +128,7 @@ Config files use `schema_version: cross-agent-consensus-config-2`. Package defau
 The three configuration mappings have separate meanings:
 
 - `participant_profiles`: role and instructions;
-- `execution_profiles`: adapter, argv, optional model/reasoning effort, prompt transport, output mode, resume declaration, and environment-variable names;
+- `execution_profiles`: adapter, argv, optional model/reasoning effort and maximum runtime, prompt transport, output mode, resume declaration, optional provider-specific rate-limit circuit, and environment-variable names;
 - `participant_identities`: one Participant Profile and one Execution Profile selected for each stable Participant Identity.
 
 Execution Profile argv is an explicit command preset. It does not bypass `invocation-ready`, does not authorize launch, and does not permit dynamic provider substitution. Version 0.13.0 rejects schema `cross-agent-consensus-config-1` and `reviewer_clis`; use `cross-agent-consensus-config-2`, `execution_profiles`, and `participant_identities`.
@@ -155,7 +155,9 @@ parses assistant and tool records, treats `session.resume_hint` as the terminal
 receipt, maps ExecutionProfile `model` to bridge option `--model`, and resumes
 through bridge option `--session <id>`. Kimi authentication and provider
 configuration stay under `KIMI_CODE_HOME`; CAC passes only allowlisted
-environment-variable names.
+environment-variable names. The default Kimi profile opens its circuit after
+three consecutive native HTTP 429 retry events or 120 seconds of cumulative
+provider-requested retry delay.
 
 ## Execution attempts
 
@@ -165,6 +167,10 @@ execution identities, input protocol-record and ArtifactVersion hashes,
 expected protocol receipt, provider session, predecessor attempt, and one of
 four retry-safety classes: `read_only`, `idempotent`, `mutating`, or
 `external_side_effect`.
+
+Before allocating `session-NNN`, `invoke-agent` completes record/path
+readiness, exact-input approval, and ReviewBudget admission. A rejected
+preflight therefore creates no failed supervised-session entry.
 
 A zero exit code proves only that the provider process stopped successfully.
 CAC records `execution_attempt_ambiguous` with `failure_mode: missing_receipt`
@@ -181,6 +187,12 @@ to inspect external state and pass `--approve-ambiguous-retry` together with
 `--operator-identity`. Nonzero exit, timeout, cancellation, and post-launch
 termination remain ambiguous for these two safety classes because the provider
 may have changed the worktree or external service before it stopped.
+
+When the Kimi rate-limit circuit opens, CAC records
+`failure_mode: provider_rate_limited`. A later attempt is blocked until the
+operator passes `--approve-provider-rate-limit-retry` with
+`--operator-identity`. The approval is stored on the new
+`execution_attempt_started` event.
 
 `consensus new-artifact --execution-attempt <attempt-id>` is the Author receipt
 path. It verifies that `--produced-by` names the same ParticipantIdentity and

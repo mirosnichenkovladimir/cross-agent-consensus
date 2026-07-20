@@ -100,6 +100,10 @@ from cross_agent_consensus.prompts import (
 )
 from cross_agent_consensus.run_macro import cmd_run
 from cross_agent_consensus.run_store import run_id_from_task
+from cross_agent_consensus.review_budget import (
+    review_budget_event_messages,
+    review_budget_status,
+)
 from cross_agent_consensus.run_audit import (
     append_run_event_locked,
     derive_run_phase,
@@ -192,9 +196,15 @@ def cmd_init(args: argparse.Namespace) -> int:
         if missing:
             raise ValueError("missing required init input(s): " + ", ".join(missing))
         run_root = Path(args.run_root)
+        if args.max_launched_review_batches < 1:
+            raise ValueError("--max-launched-review-batches must be at least 1")
+        if args.max_fresh_review_rounds < 1:
+            raise ValueError("--max-fresh-review-rounds must be at least 1")
         if args.dry_run:
             run_id = args.run_id or run_id_from_task(args.task, run_root)
             safe_relative_path(run_id, "run_id")
+            args.review_budget_id = args.review_budget_id or f"review-budget-{run_id}"
+            safe_relative_path(args.review_budget_id, "review_budget_id")
             run = run_root / run_id
             files = build_init_files(args, run_id, utc_now())
             status = "would reuse existing run" if run.exists() else "would create run"
@@ -215,6 +225,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         with exclusive_file_lock(allocation_lock):
             run_id = args.run_id or run_id_from_task(args.task, run_root)
             safe_relative_path(run_id, "run_id")
+            args.review_budget_id = args.review_budget_id or f"review-budget-{run_id}"
+            safe_relative_path(args.review_budget_id, "review_budget_id")
             run = run_root / run_id
             if run.exists() and not args.allow_existing:
                 eprint(f"error: run already exists: {run}")
@@ -228,7 +240,8 @@ def cmd_init(args: argparse.Namespace) -> int:
                     if path.exists() and args.allow_existing:
                         continue
                     atomic_write_new(path, content)
-                phase_after = derive_run_phase(parse_run_records(run))
+                records_after = parse_run_records(run)
+                phase_after = derive_run_phase(records_after)
                 append_run_event_locked(
                     run,
                     "run_initialized",
@@ -264,6 +277,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
             args.participants,
             args.integrity,
             args.run_events,
+            getattr(args, "review_budget", False),
             args.terminal,
         ]
     )
@@ -281,6 +295,14 @@ def cmd_validate(args: argparse.Namespace) -> int:
         checks.append(("integrity", check_integrity(run, snapshot)))
     if args.run_events or run_all:
         checks.append(("run-events", check_run_events(run)))
+    if getattr(args, "review_budget", False) or run_all:
+        budget_messages = review_budget_event_messages(run, snapshot.records)
+        checks.append(
+            (
+                "review-budget",
+                CheckResult(not budget_messages, budget_messages or ["review budget checks passed"]),
+            )
+        )
     if args.terminal:
         checks.append(("terminal", check_terminal(run, snapshot)))
     for name, result in checks:
@@ -296,11 +318,23 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Phase: {derive_run_phase(records)}")
     events = read_run_events(run)
     print(f"Run events: {len(events)}")
+    budget = review_budget_status(run, records)
+    if budget is None:
+        print("Review budget: legacy/unbudgeted")
+    else:
+        print(
+            "Review budget: "
+            f"{budget.review_budget_id} launched={budget.launched_review_batches} "
+            f"remaining={budget.remaining_review_batches} "
+            f"limit={budget.max_launched_review_batches} "
+            f"fresh={budget.launched_fresh_review_batches}/{budget.max_fresh_review_batches}"
+        )
     for record_type in [
         "TaskBrief",
         "Policy",
         "Participants",
         "ReviewScope",
+        "ReviewBudget",
         "ReviewBatch",
         "ArtifactVersion",
         "RawReviewerOutput",
@@ -1081,7 +1115,12 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--review-objective")
     init.add_argument("--max-fresh-review-rounds", type=int)
     init.add_argument("--max-fresh-review-rounds-without-human-approval", type=int)
+    init.add_argument("--max-launched-review-batches", type=int)
     init.add_argument("--max-remediation-rounds", type=int)
+    init.add_argument(
+        "--review-budget-id",
+        help="Shared identifier reused by replacement runs that spend one review-batch budget.",
+    )
     init.add_argument("--material-by-default", action="append")
     init.add_argument("--non-blocking-by-default", action="append")
     init.add_argument("--escalation-policy", default="escalate only when required by policy or human decision")
@@ -1162,6 +1201,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     )
+    remediate.add_argument("--max-runtime-seconds", type=float)
+    remediate.add_argument(
+        "--approve-provider-rate-limit-retry",
+        action="store_true",
+        help="Record the operator decision to retry after the provider rate-limit circuit opened.",
+    )
     remediate.set_defaults(func=cmd_remediate)
 
     validate = sub.add_parser("validate", help="Run deterministic conformance checks.")
@@ -1173,6 +1218,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--participants", action="store_true")
     validate.add_argument("--integrity", action="store_true")
     validate.add_argument("--run-events", action="store_true")
+    validate.add_argument("--review-budget", action="store_true")
     validate.add_argument("--terminal", action="store_true")
     validate.set_defaults(func=cmd_validate)
 
@@ -1357,6 +1403,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--idle-timeout-seconds", type=float, default=DEFAULT_IDLE_TIMEOUT_SECONDS)
     run.add_argument("--stale-timeout-seconds", type=float, default=DEFAULT_STALE_TIMEOUT_SECONDS)
     run.add_argument("--heartbeat-interval-seconds", type=float, default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS)
+    run.add_argument("--max-runtime-seconds", type=float)
+    run.add_argument(
+        "--approve-provider-rate-limit-retry",
+        action="store_true",
+        help="Record the operator decision to retry after the provider rate-limit circuit opened.",
+    )
     run.add_argument("--operator-identity", help="Optional operator identity stamped on OperatorApproval.")
     run.set_defaults(func=cmd_run)
 
@@ -1387,6 +1439,12 @@ def build_parser() -> argparse.ArgumentParser:
     invoke.add_argument("--idle-timeout-seconds", type=float, default=DEFAULT_IDLE_TIMEOUT_SECONDS)
     invoke.add_argument("--stale-timeout-seconds", type=float, default=DEFAULT_STALE_TIMEOUT_SECONDS)
     invoke.add_argument("--heartbeat-interval-seconds", type=float, default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS)
+    invoke.add_argument("--max-runtime-seconds", type=float)
+    invoke.add_argument(
+        "--review-batch",
+        dest="review_batch_id",
+        help="Exact ReviewBatch charged to the shared ReviewBudget for a reviewer launch.",
+    )
     invoke.add_argument(
         "--retry-safety",
         choices=["read_only", "idempotent", "mutating", "external_side_effect"],
@@ -1396,6 +1454,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--approve-ambiguous-retry",
         action="store_true",
         help="Record the operator decision to retry an unresolved mutating or external-side-effect attempt.",
+    )
+    invoke.add_argument(
+        "--approve-provider-rate-limit-retry",
+        action="store_true",
+        help="Record the operator decision to retry after the provider rate-limit circuit opened.",
     )
     invoke.add_argument(
         "--operator-identity",

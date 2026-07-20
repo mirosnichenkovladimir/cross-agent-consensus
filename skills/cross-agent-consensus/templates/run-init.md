@@ -13,6 +13,7 @@ Fill this file before reviewer work starts. If a required field is unknown, stop
 - raw-output payload root: `rounds/round-001/raw/`
 - run id source: `<generated-or-user-supplied>`
 - initial artifact version id: `v1`
+- review budget id: `review-budget-<run_id>`
 - first review batch id: `review-batch-round-1-fresh_review`
 - first round path: `rounds/round-001/`
 - first review batch path: `rounds/round-001/round.md`
@@ -60,6 +61,7 @@ required_validator_ids:
 round_limits:
   max_fresh_review_rounds: 1
   max_fresh_review_rounds_without_human_approval: 2
+  max_launched_review_batches: 3
   max_remediation_rounds_per_finding: 2
 materiality_rules:
   material_by_default:
@@ -145,6 +147,24 @@ promotion_policy_or_null: <promotion-policy-or-null>
 - In-scope overrides:
 - Out-of-scope overrides:
 - Round-limit overrides:
+
+## ReviewBudget review-budget-<run_id>
+---
+record_type: ReviewBudget
+schema_version: m2-markdown-2
+run_id: <run_id>
+actor_identity: <orchestrator_identity>
+created_at: <ISO-8601>
+review_budget_id: review-budget-<run_id>
+max_launched_review_batches: 3
+max_fresh_review_batches: 1
+ledger_path: ../.cac-review-budgets/review-budget-<run_id>/events.jsonl
+---
+
+### Review Budget Notes
+
+- Replacement runs for the same objective reuse this `review_budget_id`.
+- Initialization spends no batch; admission immediately before reviewer launch does.
 
 ## Required Follow-Up Files
 

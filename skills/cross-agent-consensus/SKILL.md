@@ -82,10 +82,12 @@ The default orchestrator pattern for long-running `invoke-agent` MUST be backgro
 
 1. Launch `invoke-agent` in the background (e.g. via the host's background-task mechanism or `nohup ... &`).
 2. Loop on `scripts/consensus agent-peek --run <run> --actor <actor>` (or `agent-status`) at the configured interval (`invocation.peek.interval_seconds`, default 180s). Report a one-line progress update to the operator each iteration.
-3. Treat `state == completed`, `failed`, `cancelled`, or stale-monitor as terminal; act accordingly.
+3. Treat `state == completed`, `failed`, `cancelled`, `timed_out`, or stale-monitor as terminal; act accordingly.
 4. Keep `agent-cancel` available throughout; if the operator interrupts, cancel the session before continuing.
 
 Foreground `invoke-agent` is acceptable only when the expected runtime is bounded under ~60s (e.g. a `--dry-run` invocation, or a deterministic validator). The `--heartbeat-interval-seconds` flag exists for foreground use but does not by itself satisfy the supervision requirement; the peek-loop pattern remains preferred.
+
+Use `--max-runtime-seconds <seconds>` or Execution Profile `max_runtime_seconds` to impose a wall-clock deadline even while the provider keeps emitting output. Kimi's default Execution Profile also opens a circuit after three consecutive HTTP 429 retry events or 120 seconds of cumulative provider-requested retry delay. Retrying after that circuit requires `--approve-provider-rate-limit-retry --operator-identity <identity>`.
 
 See `references/invocation.md` for the per-host peek-loop sketch.
 
@@ -109,6 +111,8 @@ needed and ask for approval again. A resumed invocation also binds its
 ## M2 Boundary
 
 This package is a design/manual-protocol implementation only. Do not create an automatic cross-runtime runner that executes without explicit participant selection, authorization, prompt capture, and raw-output capture. Do not infer or substitute a model/provider outside the recorded Execution Profile, and do not apply reviewer suggestions directly to an artifact. When the user or Policy explicitly names a runtime/CLI as a participant, the Orchestrator MUST invoke that CLI/tool directly only after the run folder and exact prompt are recorded and either the operator has approved the command for this run or Policy declares `unattended_invocation: true` with scope limits. A CLI is available when its binary is executable and its output can be captured to the run folder; authentication failures, timeouts, and non-zero exits are runtime errors to record, not reasons to skip evidence. If these conditions are not met, write the exact manual command or prompt into the run folder and ask the operator to run it.
+
+A Reviewer or Re-Reviewer is a participant inside the existing run. Its finalized prompt MUST say not to load or invoke this skill. Reviewer recursion would create a second orchestrator and a second review lifecycle instead of returning the requested reviewer receipt.
 
 ## Out-Of-Box Invocation Contract
 
@@ -283,7 +287,7 @@ For terse review requests, do not convert review areas into participant identiti
 
 The init record set must provide enough information to create:
 
-- TaskBrief, Policy, Participants, and ReviewScope sections in `run.md`;
+- TaskBrief, Policy, Participants, ReviewScope, and ReviewBudget sections in `run.md`;
 - the first ReviewBatch section in `rounds/round-001/round.md`;
 - the initial ArtifactVersion record in `artifacts/v1.md`.
 
@@ -327,6 +331,7 @@ For `document-consensus`, enforce these defaults unless the user or Policy overr
 
 - supported artifacts: Markdown and plain text;
 - default fresh-review rounds: `1`;
+- maximum launched review batches across linked replacement runs: `3`;
 - maximum fresh-review rounds without explicit Human Supervisor approval: `2`;
 - default remediation-verification attempts per accepted blocking finding: `2`;
 - first review batch mode: `fresh_review`;

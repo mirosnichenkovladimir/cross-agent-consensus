@@ -321,6 +321,7 @@ def validate_config_shape(data: dict[str, Any], *, source: str, persistent: bool
             allowed_limits = {
                 "max_fresh_review_rounds",
                 "max_fresh_review_rounds_without_human_approval",
+                "max_launched_review_batches",
                 "max_remediation_rounds_per_finding",
             }
             unknown_limits = sorted(set(round_limits) - allowed_limits)
@@ -614,6 +615,7 @@ def init_cli_config(args: argparse.Namespace) -> dict[str, Any]:
         "run_root": "defaults.run_root",
         "max_fresh_review_rounds": "defaults.round_limits.max_fresh_review_rounds",
         "max_fresh_review_rounds_without_human_approval": "defaults.round_limits.max_fresh_review_rounds_without_human_approval",
+        "max_launched_review_batches": "defaults.round_limits.max_launched_review_batches",
         "max_remediation_rounds": "defaults.round_limits.max_remediation_rounds_per_finding",
         "author": "participants.author",
         "orchestrator": "participants.orchestrator",
@@ -680,6 +682,10 @@ def apply_config_to_init_args(args: argparse.Namespace, resolution: ConfigResolu
         )
     if args.max_remediation_rounds is None:
         args.max_remediation_rounds = int(round_limits.get("max_remediation_rounds_per_finding") or 2)
+    if getattr(args, "max_launched_review_batches", None) is None:
+        args.max_launched_review_batches = int(
+            round_limits.get("max_launched_review_batches") or 3
+        )
     if args.author is None:
         args.author = participants.get("author")
     if args.orchestrator is None:
@@ -721,6 +727,9 @@ def consumed_config_values(args: argparse.Namespace, resolution: ConfigResolutio
         "defaults.run_root": args.run_root,
         "defaults.round_limits.max_fresh_review_rounds": args.max_fresh_review_rounds,
         "defaults.round_limits.max_fresh_review_rounds_without_human_approval": args.max_fresh_review_rounds_without_human_approval,
+        "defaults.round_limits.max_launched_review_batches": getattr(
+            args, "max_launched_review_batches", 3
+        ),
         "defaults.round_limits.max_remediation_rounds_per_finding": args.max_remediation_rounds,
         "participants.orchestrator": args.orchestrator,
         "participants.author": args.author,

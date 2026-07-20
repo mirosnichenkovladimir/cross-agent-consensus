@@ -347,14 +347,29 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
             f"{batch.data.get('target_artifact_version_id')}, not "
             f"{artifact.data.get('artifact_version_id')}"
         )
+    prompt_title = {
+        "reviewer": "Artifact Reviewer Prompt",
+        "rereview": "Artifact Re-Review Prompt",
+    }.get(args.phase, f"Cross-Agent Consensus {args.phase.title()} Prompt")
     lines = [
-        f"# Cross-Agent Consensus {args.phase.title()} Prompt",
+        f"# {prompt_title}",
         "",
         f"Run: `{task.data.get('run_id') if task else Path(args.run).name}`",
         f"Actor: `{args.actor or '<actor>'}`",
         f"Phase: `{args.phase}`",
         "",
     ]
+    if args.phase in {"reviewer", "rereview"}:
+        lines.extend(
+            [
+                "## Participant Boundary",
+                "",
+                "You are a reviewer participant inside an existing cross-agent-consensus run.",
+                "Do not load or invoke the cross-agent-consensus skill.",
+                "Review only the supplied ArtifactVersion and return the required reviewer schema.",
+                "",
+            ]
+        )
     lines.extend(participant_profile_prompt_lines(records, args.actor))
     if task:
         lines.extend(
@@ -456,7 +471,7 @@ def build_prompt(args: PromptCommandInput, records: list[Record]) -> str:
                 [
                     "## Reviewer Instructions",
                     "",
-                    "You are an independent Reviewer Agent. Review only the provided ArtifactVersion against TaskBrief, Policy, ReviewScope, and ReviewBatch mode.",
+                    "You are an independent reviewer participant. Review only the provided ArtifactVersion against TaskBrief, Policy, ReviewScope, and ReviewBatch mode.",
                     "",
                     "Review focus/lenses, if listed, are emphasis areas for this prompt only. They do not change your reviewer_identity.",
                     "",

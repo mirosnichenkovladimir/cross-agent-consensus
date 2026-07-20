@@ -7,12 +7,14 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] Run id follows `<task-slug>-consensus-NNN`, for example `layout-simplification-consensus-001`, or another unique lowercase slug accepted by the operator.
 - [ ] `run.md` exists before any reviewer, author, validator, or external agent CLI work starts.
 - [ ] `rounds/round-001/prompts/` and `rounds/round-001/raw/` exist before any host/manual invocation that can produce prompt or raw-output evidence.
-- [ ] `run.md` contains TaskBrief, Policy, Participants, and ReviewScope record sections.
+- [ ] `run.md` contains TaskBrief, Policy, Participants, ReviewScope, and ReviewBudget record sections.
 - [ ] Run metadata records `cross_agent_consensus_version`, `protocol_version`, and `layout_version`.
 - [ ] If saved configuration supplied defaults, `run.md` contains a ConfigResolution section with source paths, hashes, effective consumed values, resolved Participant Identity and Execution Profile mappings, and diagnostics.
 - [ ] Required inputs are recorded: artifact locator, objective, success criteria, profile, scope, participants, round limits, required validators, Human Supervisor identity or `none`.
 - [ ] Orchestrator identity is distinct from Author and Reviewer identities.
 - [ ] `rounds/round-001/round.md` contains a ReviewBatch section with `review_mode`.
+- [ ] ReviewBudget admission succeeds before each reviewer session is allocated; replacement runs reuse the original `review_budget_id`.
+- [ ] Any ReviewBudget overrun has an exact HumanDecision for the proposed ReviewBatch and the recorded Human Supervisor.
 - [ ] Any review focus/lens values are recorded as ReviewBatch `review_focus`, not as reviewer identities.
 - [ ] `artifacts/v1.md` or the selected initial ArtifactVersion exists.
 - [ ] A readable local ArtifactVersion has `content_hash_or_null`; a relative locator also records `content_locator_base_or_null`.
@@ -28,6 +30,8 @@ Use this checklist before review starts, after each lifecycle phase, and before 
 - [ ] Every review file is scoped to one round and one reviewer: `rounds/round-NNN/reviews/<reviewer_identity>.md`.
 - [ ] If ConfigResolution binds a reviewer to a non-manual Execution Profile with argv, that reviewer's output came through `scripts/consensus invoke-agent` and has a completed `rounds/round-NNN/agents/<reviewer>/session-*` session.
 - [ ] OperatorApproval binds each launched Participant Identity, Participant Profile, Execution Profile, exact prompt, argv, and readable local ArtifactVersion digest.
+- [ ] Reviewer and Re-Reviewer prompts identify the participant boundary and forbid loading or invoking cross-agent-consensus recursively.
+- [ ] `max_runtime_seconds`, when configured, is finite and positive; Kimi uses the recorded 429 circuit policy.
 
 ## Raw And Normalized Findings
 

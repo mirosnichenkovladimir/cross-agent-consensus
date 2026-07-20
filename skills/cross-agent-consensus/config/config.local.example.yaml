@@ -9,6 +9,7 @@ defaults:
   round_limits:
     max_fresh_review_rounds: 1
     max_fresh_review_rounds_without_human_approval: 2
+    max_launched_review_batches: 3
     max_remediation_rounds_per_finding: 2
 participants:
   orchestrator: codex-orchestrator
@@ -99,6 +100,9 @@ execution_profiles:
     prompt_transport: stdin
     output_mode: stream_json
     supports_resume: true
+    rate_limit_circuit_breaker:
+      max_consecutive_429_events: 3
+      max_cumulative_retry_delay_seconds: 120
     env:
       - HOME
       - PATH

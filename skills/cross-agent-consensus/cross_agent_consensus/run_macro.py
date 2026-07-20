@@ -11,6 +11,7 @@ for the contract and truth table.
 from __future__ import annotations
 
 import concurrent.futures
+import math
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,10 @@ from pathlib import Path
 from cross_agent_consensus import capture
 from cross_agent_consensus.approval import approval_binding, stamp_operator_approval
 from cross_agent_consensus.config import legacy_adapter_for_command
+from cross_agent_consensus.execution_attempts import (
+    assert_execution_attempt_retry_authorized,
+    resolved_retry_safety,
+)
 from cross_agent_consensus.invocation import process_monitor
 from cross_agent_consensus.invocation.process_monitor import (
     DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
@@ -35,6 +40,7 @@ from cross_agent_consensus.models import (
     InvocationCommandInput,
     InvocationReadyInput,
     PromptCommandInput,
+    RateLimitCircuitBreaker,
     Record,
     RunCommandInput,
 )
@@ -42,6 +48,7 @@ from cross_agent_consensus.prompt_command import cmd_prompt
 from cross_agent_consensus.prompts import prompt_target, raw_output_target
 from cross_agent_consensus.profiles import invocation_profile_from_records
 from cross_agent_consensus.records import first_record, parse_run_records, records_by_type
+from cross_agent_consensus.review_budget import register_review_batch_launch
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,8 @@ class ActorPlan:
     heartbeat_interval_seconds: float
     review_batch_id: str | None
     artifact_version_id: str | None
+    max_runtime_seconds: float | None = None
+    rate_limit_circuit_breaker: RateLimitCircuitBreaker | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +145,14 @@ def _legacy_runtime_command_for_actor(records: list[Record], actor: str) -> list
 
 def _invocation_profile_for_actor(
     records: list[Record], actor: str
-) -> tuple[str, str, str, list[str]]:
+) -> tuple[
+    str,
+    str,
+    str,
+    list[str],
+    float | None,
+    RateLimitCircuitBreaker | None,
+]:
     profile = invocation_profile_from_records(records, actor)
     if profile is not None:
         return (
@@ -144,6 +160,8 @@ def _invocation_profile_for_actor(
             profile.execution_profile_id,
             profile.adapter_id,
             profile.command,
+            profile.max_runtime_seconds_or_null,
+            profile.rate_limit_circuit_breaker_or_null,
         )
     command = _legacy_runtime_command_for_actor(records, actor)
     player = "manual" if actor == "manual" else legacy_adapter_for_command(command)[0]
@@ -152,6 +170,8 @@ def _invocation_profile_for_actor(
         f"legacy-inline-{actor}-execution-profile",
         player,
         command,
+        None,
+        None,
     )
 
 
@@ -190,6 +210,7 @@ def _build_plan(
     idle_timeout_seconds: float,
     stale_timeout_seconds: float,
     heartbeat_interval_seconds: float,
+    max_runtime_seconds: float | None = None,
 ) -> ActorPlan:
     batch = _active_review_batch(records, round_id)
     batch_id_value = batch.data.get("review_batch_id") if batch else None
@@ -211,7 +232,14 @@ def _build_plan(
         force_draft=False,
         dry_run=False,
     )
-    participant_profile_id, execution_profile_id, player, runtime_command = (
+    (
+        participant_profile_id,
+        execution_profile_id,
+        player,
+        runtime_command,
+        profile_max_runtime_seconds,
+        rate_limit_circuit_breaker,
+    ) = (
         _invocation_profile_for_actor(records, actor)
     )
     return ActorPlan(
@@ -228,6 +256,12 @@ def _build_plan(
         idle_timeout_seconds=idle_timeout_seconds,
         stale_timeout_seconds=stale_timeout_seconds,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
+        max_runtime_seconds=(
+            max_runtime_seconds
+            if max_runtime_seconds is not None
+            else profile_max_runtime_seconds
+        ),
+        rate_limit_circuit_breaker=rate_limit_circuit_breaker,
         review_batch_id=review_batch_id,
         artifact_version_id=artifact_version_id,
     )
@@ -317,6 +351,8 @@ def _launch_all(
     sequential: bool,
     checkpoint_id: str | None = None,
     checkpoint_input_sha256: str | None = None,
+    approve_provider_rate_limit_retry: bool = False,
+    operator_identity: str | None = None,
 ) -> dict[str, int]:
     """Invoke ``cmd_invoke_agent`` for every plan; collect per-actor exit codes.
 
@@ -339,6 +375,11 @@ def _launch_all(
             idle_timeout_seconds=plan.idle_timeout_seconds,
             stale_timeout_seconds=plan.stale_timeout_seconds,
             heartbeat_interval_seconds=plan.heartbeat_interval_seconds,
+            max_runtime_seconds=plan.max_runtime_seconds,
+            rate_limit_circuit_breaker=plan.rate_limit_circuit_breaker,
+            approve_provider_rate_limit_retry=approve_provider_rate_limit_retry,
+            operator_identity=operator_identity,
+            review_batch_id=plan.review_batch_id,
             command=list(plan.runtime_command),
             require_existing_approval=True,
             checkpoint_id=checkpoint_id,
@@ -441,10 +482,14 @@ def _fallback_lines_for_plan(plan: ActorPlan) -> list[str]:
         f"--cwd {shlex.quote(plan.cwd)}",
         "--approved",
     ]
+    if plan.review_batch_id is not None and plan.phase in {"reviewer", "rereview"}:
+        parts.append(f"--review-batch {shlex.quote(plan.review_batch_id)}")
     if plan.runtime_command:
         parts.append("--command -- " + shlex.join(plan.runtime_command))
     else:
         parts.append("--command -- <REQUIRED: argv for the player CLI>")
+    if plan.max_runtime_seconds is not None:
+        parts.insert(-1, f"--max-runtime-seconds {plan.max_runtime_seconds:g}")
     return [f"{plan.actor:>12} → " + " \\\n              ".join(parts)]
 
 
@@ -505,6 +550,16 @@ def cmd_run(args: RunCommandInput) -> int:
     phase = args.phase
     requested = [actor.strip() for actor in args.actors.split(",")] if args.actors else None
 
+    max_runtime_seconds = getattr(args, "max_runtime_seconds", None)
+    if max_runtime_seconds is not None and (
+        not isinstance(max_runtime_seconds, (int, float))
+        or isinstance(max_runtime_seconds, bool)
+        or not math.isfinite(float(max_runtime_seconds))
+        or float(max_runtime_seconds) <= 0
+    ):
+        eprint("error: --max-runtime-seconds must be a finite number greater than zero")
+        return 2
+
     if phase not in ("author", "reviewer", "rereview", "validator"):
         eprint(f"error: unsupported phase: {phase}")
         return 2
@@ -527,6 +582,7 @@ def cmd_run(args: RunCommandInput) -> int:
             idle_timeout_seconds=getattr(args, "idle_timeout_seconds", DEFAULT_IDLE_TIMEOUT_SECONDS),
             stale_timeout_seconds=getattr(args, "stale_timeout_seconds", DEFAULT_STALE_TIMEOUT_SECONDS),
             heartbeat_interval_seconds=getattr(args, "heartbeat_interval_seconds", DEFAULT_HEARTBEAT_INTERVAL_SECONDS),
+            max_runtime_seconds=getattr(args, "max_runtime_seconds", None),
         )
         for actor in actors
     ]
@@ -551,6 +607,7 @@ def cmd_run(args: RunCommandInput) -> int:
                     "heartbeat_interval_seconds",
                     DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
                 ),
+                max_runtime_seconds=getattr(args, "max_runtime_seconds", None),
             )
             for actor in prompt_actors
         ]
@@ -620,6 +677,29 @@ def cmd_run(args: RunCommandInput) -> int:
         _emit_manual_fallback(plans, blockers=blockers)
         return 3
 
+    approve_rate_limit_retry = bool(
+        getattr(args, "approve_provider_rate_limit_retry", False)
+    )
+    try:
+        for plan in plans:
+            invocation_phase = (
+                plan.phase
+                if plan.phase in {"author", "reviewer", "validator", "manual"}
+                else "reviewer"
+            )
+            assert_execution_attempt_retry_authorized(
+                run,
+                participant_identity=plan.actor,
+                phase=invocation_phase,
+                retry_safety=resolved_retry_safety(invocation_phase, None),
+                approve_ambiguous_retry=False,
+                approve_provider_rate_limit_retry=approve_rate_limit_retry,
+                operator_identity=getattr(args, "operator_identity", None),
+            )
+    except ValueError as exc:
+        eprint(f"error: retry authorization failed: {exc}")
+        return 3
+
     # Step 7 (precedes launches per design §Authoritative gating contract)
     mechanism = "policy_unattended" if scoped_matches else "cli_approved_flag"
     operator_identity = getattr(args, "operator_identity", None) or None
@@ -660,6 +740,17 @@ def cmd_run(args: RunCommandInput) -> int:
         return 3
     print(f"stamped OperatorApproval ({mechanism}): {approval_path}")
 
+    if phase in {"reviewer", "rereview"}:
+        batch = _active_review_batch(records, round_id)
+        if batch is None:
+            eprint(f"error: no ReviewBatch found for phase={phase} round={round_id}")
+            return 3
+        try:
+            register_review_batch_launch(run, records, batch)
+        except ValueError as exc:
+            eprint(f"error: review budget rejected launch: {exc}")
+            return 3
+
     # Steps 4–6 — launch + capture
     invoke_rcs = _launch_all(
         run,
@@ -667,6 +758,8 @@ def cmd_run(args: RunCommandInput) -> int:
         sequential=bool(getattr(args, "sequential", False)),
         checkpoint_id=checkpoint_id,
         checkpoint_input_sha256=checkpoint_input_sha256,
+        approve_provider_rate_limit_retry=approve_rate_limit_retry,
+        operator_identity=getattr(args, "operator_identity", None),
     )
     capture_rcs = _capture_all(run, plans=plans, exit_codes=invoke_rcs)
 

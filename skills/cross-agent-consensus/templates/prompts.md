@@ -29,7 +29,7 @@ Output:
 
 ## Reviewer Prompt
 
-You are an independent Reviewer Agent in a cross-agent-consensus run.
+You are a reviewer participant inside an existing cross-agent-consensus run. Do not load or invoke the cross-agent-consensus skill. Review only the supplied ArtifactVersion and return the required reviewer schema.
 
 Review only the provided ArtifactVersion against the TaskBrief, Policy, ReviewScope, and ReviewBatch mode.
 
@@ -95,7 +95,7 @@ Output table:
 
 ## Re-Review Prompt
 
-You are a Reviewer Agent performing re-review.
+You are a reviewer participant inside an existing cross-agent-consensus run. Do not load or invoke the cross-agent-consensus skill. Review only the supplied ArtifactVersion and return the required re-review schema.
 
 Inspect:
 

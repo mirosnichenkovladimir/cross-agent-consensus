@@ -26,11 +26,13 @@ def main() -> int:
             "stderr",
             "nonzero",
             "delay",
+            "active_delay",
             "child_process",
             "orphan_child",
             "digest_mismatch",
             "draft_reviewer",
             "resumed",
+            "kimi_429_loop",
         ],
     )
     parser.add_argument("--delay-seconds", type=float, default=1.0)
@@ -81,6 +83,12 @@ def main() -> int:
     elif args.mode == "delay":
         time.sleep(args.delay_seconds)
         print("reviewed")
+    elif args.mode == "active_delay":
+        deadline = time.monotonic() + args.delay_seconds
+        while time.monotonic() < deadline:
+            print(json.dumps({"type": "heartbeat"}), flush=True)
+            time.sleep(0.02)
+        print("reviewed")
     elif args.mode == "child_process":
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         print(json.dumps({"child_pid": child.pid}), flush=True)
@@ -117,6 +125,20 @@ def main() -> int:
     elif args.mode == "resumed":
         print(json.dumps({"type": "session", "session_id": args.session_id, "resumed": True}))
         print(json.dumps({"type": "result", "result": f"resumed:{prompt}"}))
+    elif args.mode == "kimi_429_loop":
+        for _ in range(3):
+            print(
+                json.dumps(
+                    {
+                        "type": "turn.step.retrying",
+                        "status_code": 429,
+                        "delay_ms": 45000,
+                    }
+                ),
+                flush=True,
+            )
+            time.sleep(0.02)
+        time.sleep(args.delay_seconds)
     return 0
 
 

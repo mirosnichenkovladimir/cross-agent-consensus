@@ -245,6 +245,7 @@ def _ordinary_operator_wait_allows_review(
         return False
     if any(
         requirement.startswith("OperatorApproval:ambiguous-retry:")
+        or requirement.startswith("OperatorApproval:provider-rate-limit-retry:")
         for requirement in next_plan.required_records
     ):
         return False
@@ -427,6 +428,10 @@ def cmd_remediate(args: argparse.Namespace) -> int:
             stale_timeout_seconds=args.stale_timeout_seconds,
             heartbeat_interval_seconds=args.heartbeat_interval_seconds,
             operator_identity=args.operator_identity,
+            max_runtime_seconds=getattr(args, "max_runtime_seconds", None),
+            approve_provider_rate_limit_retry=bool(
+                getattr(args, "approve_provider_rate_limit_retry", False)
+            ),
             checkpoint_id=plan.checkpoint_id_or_null,
             checkpoint_input_sha256=plan.checkpoint_input_sha256,
         )

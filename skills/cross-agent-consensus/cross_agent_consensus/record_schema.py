@@ -48,6 +48,12 @@ REQUIRED_FIELDS = {
         "max_remediation_rounds_per_finding",
         "promotion_policy_or_null",
     ],
+    "ReviewBudget": [
+        "review_budget_id",
+        "max_launched_review_batches",
+        "max_fresh_review_batches",
+        "ledger_path",
+    ],
     "ReviewBatch": [
         "review_batch_id",
         "review_scope_id",
@@ -225,6 +231,7 @@ ENUMS = {
         "waive_validator",
         "terminate_escalated_to_human",
         "abort_run",
+        "authorize_review_budget_overrun",
     },
     "terminal_condition": {"consensus_reached", "round_limit_reached", "escalated_to_human", "aborted"},
     "mechanism": {"cli_approved_flag", "policy_unattended"},
@@ -249,6 +256,7 @@ ID_FIELDS = {
     "Policy": "policy_id",
     "Participants": "participants_record_id",
     "ReviewScope": "review_scope_id",
+    "ReviewBudget": "review_budget_id",
     "ReviewBatch": "review_batch_id",
     "ArtifactVersion": "artifact_version_id",
     "RawReviewerOutput": "raw_output_id",
@@ -305,7 +313,9 @@ BOOLEAN_FIELDS = {
 }
 
 INTEGER_FIELDS = {
+    "max_fresh_review_batches",
     "max_fresh_review_rounds",
+    "max_launched_review_batches",
     "max_remediation_rounds_per_finding",
 }
 
@@ -359,6 +369,8 @@ OPTIONAL_FIELD_TYPES: dict[str, tuple[type[object], ...]] = {
     "resolved_participant_identities": (dict,),
     "resolved_execution_profiles": (dict,),
     "validator_identities": (list,),
+    "review_budget_id": (str,),
+    "approved_review_batch_id": (str,),
 }
 
 

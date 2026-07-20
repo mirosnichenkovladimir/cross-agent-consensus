@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import math
 import os
 import selectors
 import signal
@@ -27,6 +28,7 @@ from cross_agent_consensus.io import (
 from cross_agent_consensus.approval import ensure_invocation_approval, verify_invocation_approval
 from cross_agent_consensus.execution_attempts import (
     append_attempt_observation,
+    assert_execution_attempt_retry_authorized,
     resolved_retry_safety,
     start_execution_attempt,
 )
@@ -36,6 +38,7 @@ from cross_agent_consensus.models import (
     CommandSpec,
     InvocationCommandInput,
     InvocationReadyInput,
+    Record,
 )
 from cross_agent_consensus.profiles import bind_recorded_invocation_profile
 from cross_agent_consensus.provider_sessions import (
@@ -43,6 +46,10 @@ from cross_agent_consensus.provider_sessions import (
     resolve_provider_session_continuation,
 )
 from cross_agent_consensus.records import parse_run_records
+from cross_agent_consensus.layout import record_round_number, round_number
+from cross_agent_consensus.prompts import review_batch_by_id
+from cross_agent_consensus.records import records_by_type
+from cross_agent_consensus.review_budget import register_review_batch_launch
 
 from .adapters import GenericCliPlayer, ManualPlayer, ProviderOutputError, StructuredJsonCliPlayer, get_player_adapter
 from .readiness import (
@@ -258,6 +265,8 @@ def build_agent_invocation(args: InvocationCommandInput, paths: AgentSessionPath
         idle_timeout_seconds=args.idle_timeout_seconds,
         stale_timeout_seconds=args.stale_timeout_seconds,
         heartbeat_interval_seconds=args.heartbeat_interval_seconds,
+        max_runtime_seconds=getattr(args, "max_runtime_seconds", None),
+        rate_limit_circuit_breaker=getattr(args, "rate_limit_circuit_breaker", None),
         session_id=paths.session.name,
         retry_safety=resolved_retry_safety(args.phase, args.retry_safety),
         resume_provider_session_entry_id=getattr(
@@ -350,8 +359,11 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
     stream_buffers = {"stdout": "", "stderr": ""}
     agent_log_buffers = {"stdout": "", "stderr": ""}
     timeout_requested_at: float | None = None
+    stop_reason: str | None = None
     timeout_termination_sent = False
     timeout_force_kill_sent = False
+    consecutive_429_events = 0
+    cumulative_retry_delay_seconds = 0.0
     try:
         started_monotonic = time.monotonic()
         started_at = utc_now()
@@ -434,9 +446,72 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                             )
                             for event in adapter.parse_stream_events(stream_name, data, stream_buffers, invocation):
                                 append_jsonl(paths.events, event)
+                                native_event = event.get("native_event")
+                                native_type = str(event.get("native_type") or "unknown")
+                                retry_seconds = (
+                                    adapter.provider_rate_limit_retry_seconds(
+                                        native_event, native_type
+                                    )
+                                    if isinstance(native_event, dict)
+                                    else None
+                                )
+                                if retry_seconds is not None:
+                                    consecutive_429_events += 1
+                                    cumulative_retry_delay_seconds += retry_seconds
+                                    append_agent_event(
+                                        paths,
+                                        invocation,
+                                        "provider_rate_limit_retry",
+                                        consecutive_429_events=consecutive_429_events,
+                                        cumulative_retry_delay_seconds=round(
+                                            cumulative_retry_delay_seconds, 3
+                                        ),
+                                    )
+                                    breaker = invocation.rate_limit_circuit_breaker
+                                    if (
+                                        breaker is not None
+                                        and timeout_requested_at is None
+                                        and (
+                                            consecutive_429_events
+                                            >= breaker.max_consecutive_429_events
+                                            or cumulative_retry_delay_seconds
+                                            >= breaker.max_cumulative_retry_delay_seconds
+                                        )
+                                    ):
+                                        timeout_requested_at = time.monotonic()
+                                        stop_reason = "provider_rate_limited"
+                                        append_agent_event(
+                                            paths,
+                                            invocation,
+                                            "provider_rate_limit_circuit_opened",
+                                            consecutive_429_events=consecutive_429_events,
+                                            cumulative_retry_delay_seconds=round(
+                                                cumulative_retry_delay_seconds, 3
+                                            ),
+                                        )
+                                elif event.get("normalized_type") in {
+                                    "message",
+                                    "tool_call",
+                                    "tool_result",
+                                    "final",
+                                }:
+                                    consecutive_429_events = 0
                     else:
                         selector.unregister(stream)
                 now = time.monotonic()
+                if (
+                    invocation.max_runtime_seconds is not None
+                    and now - started_monotonic >= invocation.max_runtime_seconds
+                    and timeout_requested_at is None
+                ):
+                    timeout_requested_at = now
+                    stop_reason = "max_runtime_exceeded"
+                    append_agent_event(
+                        paths,
+                        invocation,
+                        "max_runtime_exceeded",
+                        max_runtime_seconds=invocation.max_runtime_seconds,
+                    )
                 if now >= next_heartbeat:
                     new_state = classify_live_agent_state(last_activity_monotonic, invocation)
                     if new_state != current_state:
@@ -460,6 +535,7 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                     next_heartbeat = now + max(0.05, invocation.heartbeat_interval_seconds)
                     if new_state == "stale" and timeout_requested_at is None:
                         timeout_requested_at = now
+                        stop_reason = "stale_timeout"
                         append_agent_event(paths, invocation, "timeout_requested")
                 if (
                     timeout_requested_at is not None
@@ -467,7 +543,13 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                     and now - timeout_requested_at >= 0.5
                 ):
                     timeout_termination_sent = True
-                    append_agent_event(paths, invocation, "timeout_terminate")
+                    append_agent_event(
+                        paths,
+                        invocation,
+                        "provider_rate_limit_terminate"
+                        if stop_reason == "provider_rate_limited"
+                        else "timeout_terminate",
+                    )
                     try:
                         os.killpg(process_group_id, signal.SIGTERM)
                     except OSError:
@@ -478,7 +560,13 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                     and now - timeout_requested_at >= DEFAULT_CANCEL_GRACE_SECONDS
                 ):
                     timeout_force_kill_sent = True
-                    append_agent_event(paths, invocation, "timeout_force_kill")
+                    append_agent_event(
+                        paths,
+                        invocation,
+                        "provider_rate_limit_force_kill"
+                        if stop_reason == "provider_rate_limited"
+                        else "timeout_force_kill",
+                    )
                     try:
                         os.killpg(process_group_id, signal.SIGKILL)
                     except OSError:
@@ -508,12 +596,26 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
                 shutil.copyfile(paths.stdout, invocation.raw_output_path)
             append_agent_event(paths, invocation, "cancelled", exit_code=return_code, signal=signal_number)
         elif timeout_requested_at is not None:
-            final_state = "timed_out"
-            failure_reason = "provider emitted no output before stale timeout"
+            final_state = "failed" if stop_reason == "provider_rate_limited" else "timed_out"
+            failure_reason = (
+                "provider_rate_limited"
+                if stop_reason == "provider_rate_limited"
+                else "max_runtime_exceeded"
+                if stop_reason == "max_runtime_exceeded"
+                else "provider emitted no output before stale timeout"
+            )
             if paths.stdout.is_file():
                 invocation.raw_output_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(paths.stdout, invocation.raw_output_path)
-            append_agent_event(paths, invocation, "timed_out", exit_code=return_code, signal=signal_number)
+            append_agent_event(
+                paths,
+                invocation,
+                "provider_rate_limited"
+                if stop_reason == "provider_rate_limited"
+                else "timed_out",
+                exit_code=return_code,
+                signal=signal_number,
+            )
         elif return_code == 0:
             final_state = "completed"
             require_structured_output = (
@@ -603,7 +705,9 @@ def run_generic_agent(invocation: AgentInvocation, paths: AgentSessionPaths, com
             )
         else:
             failure_mode = (
-                "timeout"
+                "provider_rate_limited"
+                if stop_reason == "provider_rate_limited"
+                else "timeout"
                 if final_state == "timed_out"
                 else "process_termination"
                 if final_state == "cancelled" or signal_number is not None
@@ -690,11 +794,33 @@ def exact_invocation_approval(
     )
 
 
+def _review_batch_for_invocation(
+    records: list[Record], args: InvocationCommandInput
+) -> Record | None:
+    review_batch_id = getattr(args, "review_batch_id", None)
+    if review_batch_id:
+        batch = review_batch_by_id(records, review_batch_id)
+        if batch is None:
+            raise ValueError(f"review_batch_id not found: {review_batch_id}")
+        if record_round_number(batch) != round_number(args.round):
+            raise ValueError(
+                f"ReviewBatch {review_batch_id} does not belong to {padded_round_id(args.round)}"
+            )
+        return batch
+    matching = [
+        record
+        for record in records_by_type(records, "ReviewBatch")
+        if record_round_number(record) == round_number(args.round)
+    ]
+    return matching[-1] if matching else None
+
+
 def cmd_invoke_agent(args: InvocationCommandInput) -> int:
     run = Path(args.run)
+    records = parse_run_records(run)
     command = runtime_command(args.command)
     command, profile_messages = bind_recorded_invocation_profile(
-        parse_run_records(run), args, command
+        records, args, command
     )
     execution_profile_command = list(command)
     require_existing_approval = bool(getattr(args, "require_existing_approval", False))
@@ -727,7 +853,7 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
                 accepted_resolution,
             ) = resolve_provider_session_continuation(
                 run,
-                parse_run_records(run),
+                records,
                 provider_session_entry_id=resume_entry_id,
                 participant_identity=args.actor,
                 participant_profile_id=(
@@ -763,6 +889,14 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
                 )
         if args.stale_timeout_seconds < args.idle_timeout_seconds:
             raise ValueError("--stale-timeout-seconds must be greater than or equal to --idle-timeout-seconds")
+        max_runtime_seconds = getattr(args, "max_runtime_seconds", None)
+        if max_runtime_seconds is not None and (
+            not isinstance(max_runtime_seconds, (int, float))
+            or isinstance(max_runtime_seconds, bool)
+            or not math.isfinite(float(max_runtime_seconds))
+            or float(max_runtime_seconds) <= 0
+        ):
+            raise ValueError("--max-runtime-seconds must be a finite number greater than zero")
         secret_messages = secret_argv_errors(command)
         if secret_messages:
             reason = "; ".join(secret_messages)
@@ -792,9 +926,9 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             except ValueError as exc:
                 eprint(f"error: {exc}")
                 return 3
-        invocation, paths, command_spec = prepare_agent_session(args, command)
-        print(f"session: {paths.session}")
-        if invocation.player_id == "manual":
+        if args.player == "manual":
+            invocation, paths, command_spec = prepare_agent_session(args, command)
+            print(f"session: {paths.session}")
             approval_binding: dict[str, Any] | None = None
             if args.approved:
                 try:
@@ -849,19 +983,48 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
         )
         messages.extend(invoke_agent_round_path_errors(run, args))
         if messages:
-            reason = "; ".join(messages)
-            record_failed_agent_session(paths, invocation, reason)
             for message in messages:
                 eprint(f"error: {message}")
+            return 3
+        invocation_retry_safety = resolved_retry_safety(args.phase, args.retry_safety)
+        try:
+            assert_execution_attempt_retry_authorized(
+                run,
+                participant_identity=args.actor,
+                phase=args.phase,
+                retry_safety=invocation_retry_safety,
+                approve_ambiguous_retry=bool(
+                    getattr(args, "approve_ambiguous_retry", False)
+                ),
+                approve_provider_rate_limit_retry=bool(
+                    getattr(args, "approve_provider_rate_limit_retry", False)
+                ),
+                operator_identity=getattr(args, "operator_identity", None),
+            )
+        except ValueError as exc:
+            eprint(f"error: {exc}")
             return 3
         try:
             approval_binding = preverified_approval or exact_invocation_approval(
                 args, command, require_existing=False
             )
         except ValueError as exc:
-            record_failed_agent_session(paths, invocation, str(exc))
             eprint(f"error: {exc}")
             return 3
+        if args.phase == "reviewer":
+            batch = _review_batch_for_invocation(records, args)
+            if batch is None:
+                eprint(
+                    f"error: no ReviewBatch found for reviewer invocation in {padded_round_id(args.round)}"
+                )
+                return 3
+            try:
+                register_review_batch_launch(run, records, batch)
+            except ValueError as exc:
+                eprint(f"error: review budget rejected launch: {exc}")
+                return 3
+        invocation, paths, command_spec = prepare_agent_session(args, command)
+        print(f"session: {paths.session}")
         if not paths.prompt.is_file() or sha256_file(paths.prompt) != approval_binding["prompt_sha256"]:
             reason = "session prompt copy does not match OperatorApproval"
             record_failed_agent_session(paths, invocation, reason)
@@ -872,6 +1035,9 @@ def cmd_invoke_agent(args: InvocationCommandInput) -> int:
             retry_safety=invocation.retry_safety,
             approve_ambiguous_retry=bool(getattr(args, "approve_ambiguous_retry", False)),
             ambiguous_retry_operator_identity=getattr(args, "operator_identity", None),
+            approve_provider_rate_limit_retry=bool(
+                getattr(args, "approve_provider_rate_limit_retry", False)
+            ),
         )
         write_invocation_json(paths, invocation)
         return run_generic_agent(invocation, paths, command_spec)

@@ -23,6 +23,51 @@ from cross_agent_consensus.prompts import (
 
 
 class PromptTests(unittest.TestCase):
+    def test_reviewer_prompt_forbids_recursive_cac_invocation(self) -> None:
+        records = [
+            Record(
+                "ReviewBatch",
+                "batch-v1",
+                Path("rounds/round-001/round.md"),
+                1,
+                {
+                    "review_batch_id": "batch-v1",
+                    "round_id": "round-1",
+                    "review_mode": "fresh_review",
+                    "target_artifact_version_id": "v1",
+                },
+            ),
+            Record(
+                "ArtifactVersion",
+                "v1",
+                Path("artifacts/v1.md"),
+                1,
+                {
+                    "artifact_version_id": "v1",
+                    "content_locator": "artifact.md",
+                    "content_hash_or_null": None,
+                },
+            ),
+        ]
+        args = PromptCommandInput(
+            run="run",
+            phase="reviewer",
+            actor="reviewer",
+            artifact_version="v1",
+            round="round-1",
+            review_batch="batch-v1",
+            output=None,
+            force_draft=False,
+            dry_run=False,
+        )
+
+        prompt = build_prompt(args, records)
+
+        self.assertTrue(prompt.startswith("# Artifact Reviewer Prompt\n"))
+        self.assertIn("## Participant Boundary", prompt)
+        self.assertIn("Do not load or invoke the cross-agent-consensus skill.", prompt)
+        self.assertLess(prompt.index("## Participant Boundary"), prompt.index("## ArtifactVersion"))
+
     def test_reviewer_prompt_rejects_missing_explicit_artifact(self) -> None:
         records = [
             Record(

@@ -120,6 +120,7 @@ runs/<run_id>/
 | Policy | `run.md` section |
 | Participants | `run.md` section |
 | ReviewScope | `run.md` section |
+| ReviewBudget | `run.md` section; shared ledger at the record's `ledger_path` |
 | ReviewBatch | `rounds/round-NNN/round.md` section |
 | ArtifactVersion | `artifacts/<artifact_version_id>.md` |
 | RawReviewerOutput | `rounds/round-NNN/reviews/<reviewer_identity>.md` section |
@@ -147,6 +148,7 @@ runs/<run_id>/
 | `Policy` | `policy_id`, `profile`, `required_validator_ids`, `round_limits`, `materiality_rules`, `escalation_policy`, `waiver_authority_or_null` |
 | `Participants` | `participants_record_id`, `orchestrator_identity`, `author_identity`, `reviewer_identities`, `human_supervisor_identity_or_null` |
 | `ReviewScope` | `review_scope_id`, `objective`, `in_scope`, `out_of_scope`, `review_modes_allowed`, `max_fresh_review_rounds`, `max_remediation_rounds_per_finding`, `promotion_policy_or_null` |
+| `ReviewBudget` | `review_budget_id`, `max_launched_review_batches`, `max_fresh_review_batches`, `ledger_path` |
 | `ReviewBatch` | `review_batch_id`, `review_scope_id`, `review_mode`, `target_artifact_version_id`, `source_finding_ids`, `round_id` |
 | `ArtifactVersion` | `artifact_version_id`, `predecessor_id_or_null`, `content_locator`, `content_hash_or_null`, `produced_by`; CLI-created local records also use `content_locator_base_or_null` |
 | `RawReviewerOutput` | `raw_output_id`, `reviewer_identity`, `review_batch_id`, `artifact_version_id`, `raw_finding_ids`, `is_first_round_independent`; CLI capture also records `raw_payload_path`, `raw_payload_sha256`, `capture_origin`, `session_id_or_null`, `session_path_or_null`, `prompt_sha256_or_null`, `session_exit_sha256_or_null` |
@@ -165,6 +167,8 @@ runs/<run_id>/
 | `FinalReport` | `final_report_id`, `termination_record_id`, `terminal_condition`, `final_artifact_version_id_or_null`, `validator_status`, `unresolved_finding_ids`, `backlog_path` |
 | `ConfigResolution` | `config_resolution_id`, `config_schema_version`, `sources`, `effective_values`, `resolved_participant_identities`, `resolved_execution_profiles`, `diagnostics`, `redactions` |
 | `OperatorApproval` | `operator_approval_id`, `approved_actors`, `scope_run_id`, `scope_round_id`, `scope_phase`, `mechanism`, `operator_identity_or_null`; current CLI-created approvals also record `approval_binding_version: exact-inputs-2` and `approved_invocations` keyed by `participant_identity`, `participant_profile_id`, and `execution_profile_id`; resumed bindings add the provider-session entry and provider identifier |
+
+`ReviewBudget` is shared across replacement runs that reuse its ID. The ledger counts an exact ReviewBatch once per run, permits three launched batches and one fresh batch by default, and stores a hash chain plus digest anchor. An overrun requires a `HumanDecision` whose `decision_type` is `authorize_review_budget_overrun`, `review_budget_id` and `approved_review_batch_id` match exactly, `binding_authority` names the recorded Human Supervisor, and `affected_finding_ids_or_validator_ids` is exactly `["__run_scope__"]`.
 
 ReviewBatch sections may use optional frontmatter `review_focus` to record review lenses or emphasis areas. `review_focus` never changes Participants and must not be used as `reviewer_identity`.
 
@@ -222,7 +226,7 @@ are audit files, not protocol records.
 - `response_type`: `accept`, `reject`, `partially_accept`, `request_clarification`.
 - `re_review.decision`: `verified`, `rejection_accepted`, `still_valid`, `disputed`, `needs_human`.
 - `ValidationEvidence.result`: `pass`, `fail`, `error`, `waived`.
-- `HumanDecision.decision_type`: `mark_resolved`, `accept_author_rejection`, `require_revision`, `mark_non_material`, `dispute_materiality`, `waive_validator`, `terminate_escalated_to_human`, `abort_run`.
+- `HumanDecision.decision_type`: `mark_resolved`, `accept_author_rejection`, `require_revision`, `mark_non_material`, `dispute_materiality`, `waive_validator`, `terminate_escalated_to_human`, `abort_run`, `authorize_review_budget_overrun`.
 - `terminal_condition`: `consensus_reached`, `round_limit_reached`, `escalated_to_human`, `aborted`.
 
 ## Installer And Managed Files

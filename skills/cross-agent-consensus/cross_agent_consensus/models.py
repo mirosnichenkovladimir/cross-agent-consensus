@@ -77,6 +77,12 @@ class ParticipantProfile:
 
 
 @dataclass(frozen=True)
+class RateLimitCircuitBreaker:
+    max_consecutive_429_events: int
+    max_cumulative_retry_delay_seconds: float
+
+
+@dataclass(frozen=True)
 class ExecutionProfile:
     execution_profile_id: str
     adapter_id: str
@@ -87,6 +93,8 @@ class ExecutionProfile:
     output_mode: str
     supports_resume: bool
     env_allowlist: list[str]
+    max_runtime_seconds_or_null: float | None = None
+    rate_limit_circuit_breaker_or_null: RateLimitCircuitBreaker | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +162,8 @@ class ResolvedInvocationProfile:
     output_mode: str
     supports_resume: bool
     env_allowlist: list[str]
+    max_runtime_seconds_or_null: float | None = None
+    rate_limit_circuit_breaker_or_null: RateLimitCircuitBreaker | None = None
 
 
 @dataclass
@@ -211,6 +221,8 @@ class AgentInvocation:
     prompt_transport: str = "stdin"
     output_mode: str = "raw_stdout"
     env_allowlist: list[str] = field(default_factory=list)
+    max_runtime_seconds: float | None = None
+    rate_limit_circuit_breaker: RateLimitCircuitBreaker | None = None
 
 
 @dataclass
@@ -282,10 +294,14 @@ class InvocationCommandInput(InvocationReadyInput):
     idle_timeout_seconds: float
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
+    max_runtime_seconds: float | None = None
+    rate_limit_circuit_breaker: RateLimitCircuitBreaker | None = None
     require_existing_approval: bool = False
     retry_safety: str | None = None
     approve_ambiguous_retry: bool = False
+    approve_provider_rate_limit_retry: bool = False
     operator_identity: str | None = None
+    review_batch_id: str | None = None
     resume_provider_session_entry_id: str | None = None
     definition_drift_resolution: str | None = None
     definition_drift_reference: str | None = None
@@ -312,5 +328,7 @@ class RunCommandInput:
     stale_timeout_seconds: float
     heartbeat_interval_seconds: float
     operator_identity: str | None
+    max_runtime_seconds: float | None = None
+    approve_provider_rate_limit_retry: bool = False
     checkpoint_id: str | None = None
     checkpoint_input_sha256: str | None = None
